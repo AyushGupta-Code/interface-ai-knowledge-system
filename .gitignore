@@ -1,0 +1,17 @@
+results/
+__pycache__/
+*.pyc
+.DS_Store
+.env
+snapshots/0*/
+
+# secrets
+.env*
+.secrets/
+*.pem
+
+# duplicate of this kit
+hackathon-knowledge-kit-participant.zip
+
+# supplied website snapshots: must stay out of the public repo
+snapshots_zip/

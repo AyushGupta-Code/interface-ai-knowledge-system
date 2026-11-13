@@ -123,10 +123,17 @@ def _num(s: str) -> float:
     return float(s.replace(",", ""))
 
 
+# Calendar dates in a question ("as of May 2026", "2026-05-31") say when, not what: they are not
+# qualifiers. Model years ("a 2026 vehicle") are, so only whole date phrases are masked.
+DATE_SPAN = re.compile(
+    r"\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?(?:\s+\d{1,2}(?:st|nd|rd|th)?,?)?\s+(?:19|20)\d\d\b"
+    r"|\b(?:19|20)\d\d-\d{1,2}(?:-\d{1,2})?\b|\b(?:as of|in|during) (?:19|20)\d\d\b(?!-)", re.I)
+
+
 def question_numbers(question: str) -> list[float]:
-    """Numbers that qualify the question (terms, amounts, years); percentages are not qualifiers."""
+    """Numbers that qualify the question (terms, amounts, model years); percentages and dates are not qualifiers."""
     out = []
-    for m in re.finditer(r"\$?(\d[\d,]*(?:\.\d+)?)(\s*%)?", question):
+    for m in re.finditer(r"\$?(\d[\d,]*(?:\.\d+)?)(\s*%)?", DATE_SPAN.sub(" ", question)):
         if not m.group(2):
             out.append(_num(m.group(1)))
     return out

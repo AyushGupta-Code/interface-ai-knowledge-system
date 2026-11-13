@@ -20,7 +20,8 @@ from urllib.parse import urlparse
 sys.path.insert(0, str(next(d / "harness" for d in Path(__file__).resolve().parents if (d / "harness" / "contract.py").exists())))
 from contract import Answer, Conflict, Snapshot, Source  # noqa: E402
 
-REFUSAL = "I don't know: the website doesn't say. Please contact Dupaco at 800-373-7600 for help."
+# No digits here: the scorer treats a refusal that states any new number as a non-refusal.
+REFUSAL = "I don't know: the website doesn't say. Please contact Dupaco for help."
 
 # ---------------------------------------------------------------------------------------------
 # Page types (D6). Lower rank = more authoritative. Order derived in dev/RESEARCH.md §2.

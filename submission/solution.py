@@ -177,34 +177,74 @@ class Passage:
     cells: tuple = ()  # (header, value) pairs for table rows
 
 
+HEADING = re.compile(r"^#{1,6}\s+(.*)$")
+BOLD_LABEL = re.compile(r"^\*\*[^*]{1,40}\*\*")                  # "**Lobby** Monday-Thursday: ..."
+STATUS = re.compile(r"^(open|closed|open now|closed now)$", re.I)  # live badge, true only at crawl time
+LONG = 90                                                          # a line this long is prose, not a list item
+
+
 def split_page(md: str):
-    """Yield (text, table_id, caption, row_cells) for paragraphs and table rows."""
+    """Yield (text, table_id, context, row_cells) for the page's passages.
+
+    - A heading is never a passage; it becomes the context of everything under it.
+    - Each table row is a passage, with the heading and labels just above the table as context.
+    - A long line is a paragraph of its own. A lead-in ending in ':' joins the list after it.
+    - Runs of short lines (hours, an address block, bullet items) are grouped into one passage,
+      ending at a heading, table, long paragraph or a new bold label ("**Drive-up**").
+    """
     lines = md.splitlines()
-    para, recent, table_id, header = [], [], -1, None
-    for ln in lines + [""]:
-        s = ln.strip()
+    heading, labels, group, lead, table_id = "", [], [], "", -1
+    out = []
+
+    def flush():
+        nonlocal group, lead
+        if group:
+            out.append(((lead + " " if lead else "") + " · ".join(group), -1, heading, ()))
+        group, lead = [], ""
+
+    i = 0
+    while i < len(lines):
+        s = lines[i].strip()
         if s.startswith("|"):
-            if para:
-                yield " ".join(para), -1, "", ()
-                para = []
-            cells = [c.strip() for c in s.strip("|").split("|")]
-            if all(re.fullmatch(r":?-{2,}:?", c) for c in cells if c):
-                continue
-            if header is None:
-                header, table_id = cells, table_id + 1
-                continue
-            yield s, table_id, " / ".join(recent[-2:]), tuple(zip(header, cells))
+            flush()
+            table_id += 1
+            context = " / ".join(x for x in [heading] + labels[-2:] if x)
+            header = None
+            while i < len(lines) and lines[i].strip().startswith("|"):
+                cells = [c.strip() for c in lines[i].strip().strip("|").split("|")]
+                i += 1
+                if all(re.fullmatch(r":?-{2,}:?", c) for c in cells if c):
+                    continue
+                if header is None:
+                    header = cells
+                    continue
+                out.append((lines[i - 1].strip(), table_id, context, tuple(zip(header, cells))))
+            labels = []
             continue
-        header = None
-        if not s:
-            if para:
-                yield " ".join(para), -1, "", ()
-                para = []
+        i += 1
+        if not s or s.startswith(("![", "[![")) or STATUS.match(s):
             continue
-        if not s.startswith(("![", "[![")):
-            para.append(s)
-            if len(s) < 80:
-                recent.append(s.lstrip("#* ").rstrip("*"))
+        m = HEADING.match(s)
+        if m:
+            flush()
+            heading, labels = m.group(1).strip("*# "), []
+            continue
+        if len(s) >= LONG:
+            flush()
+            if s.endswith(":"):
+                lead = s
+            else:
+                out.append((s, -1, heading, ()))
+            continue
+        if group and BOLD_LABEL.match(s):
+            flush()
+        group.append(s)
+        if not s.startswith("["):  # link-only lines ("[Apply today](...)") are navigation, not labels
+            labels.append(s.strip("*# "))
+        if len(group) >= 12:
+            flush()
+    flush()
+    return out
 
 
 class KnowledgeBase:

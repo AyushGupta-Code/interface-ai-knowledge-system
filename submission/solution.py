@@ -139,7 +139,8 @@ def answer_shape(question: str) -> str:
         return "any"   # "How do I change my address?" asks for a procedure, not an address
     if re.search(r"\b(link|url|website|web ?page)\b|which page|where (?:on|can i (?:find|see)|do i (?:find|see))", q):
         return "link"
-    if re.search(r"\bwhat date\b|\bstill open\b|\bclosing\b|\bshut down\b|\bwhen (?:does|will|did)\b.*\bclose", q):
+    if re.search(r"\bwhat date\b|\bstill (?:open|visit|go|use|bank)\b|\bopen (?:now|anymore)\b|\bclosing\b|\bshut down\b"
+                 r"|\bwhen (?:does|will|did)\b.*\bclose", q) and not re.search(r"\binstead\b|\bwhich branch|\bwhere\b", q):
         return "date"
     if re.search(r"\bhours?\b|what time|\bwhen\b.*\bopen\b", q):
         return "hours"
@@ -186,6 +187,9 @@ def passage_shapes(kind: str, text: str, cells=()) -> frozenset:
 # Category words never decide whether a passage is about the question's specific subject (D9).
 GENERIC = set("""rate interest apr apy dividend yield fee charge cost hour open time address located where branch
 location loan account saving member number link url website page dupaco credit union bank month year""".split())
+BUNDLE_MARGIN = 0.15   # same margin as the candidate cutoff: passages this close are equally good evidence
+
+
 # Wording words: they say how the member phrased the question, not what it is about, so they can never
 # be the specific word (dev/REFUSAL_TRACE.md: between, highest, list... were chosen and caused refusals).
 WORDING = set("between highest lowest top best list".split())
@@ -499,7 +503,15 @@ class KnowledgeBase:
             body = "\n".join(f"- {self.passages[pid].text}" for pid in row_ids)
             sources += [Source(url=u, snapshot_id=sid) for u in self._same_fact_pages(row_ids, win.url)]
         else:
-            body = win.text if len(win.text) <= 600 else win.text[:600].rsplit(" ", 1)[0] + " ..."
+            # Evidence bundle: the page's other passages that pass every check and score close to the
+            # winner, in page order, so an answer split over adjacent paragraphs (a program and its
+            # amount, a closure and its date) is not cut in half. Same page only.
+            near = sorted(pid for pid in score if self.passages[pid].page == win.page
+                          and self.passages[pid].table < 0 and score[pid] >= score[win_id] - BUNDLE_MARGIN)
+            near = ([win_id] + [pid for pid in near if pid != win_id])[:3]
+            parts = [self.passages[pid].text for pid in sorted(near)]
+            body = " ... ".join(parts)
+            body = body if len(body) <= 900 else body[:900].rsplit(" ", 1)[0] + " ..."
         when = f"as of {taken_on}" if as_of else "currently"
         text = f"{win.title or 'Dupaco'} ({when}):\n{body}\nSource: {win.url}"
         return Answer(text=text, sources=sources)

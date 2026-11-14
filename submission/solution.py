@@ -382,13 +382,17 @@ class KnowledgeBase:
         k = bisect_right(dates, as_of[:10])
         return order[k - 1] if k else None
 
-    def answer(self, question: str, as_of=None) -> Answer:
+    def answer(self, question: str, as_of=None, _trace=None) -> Answer:
+        """_trace: optional dict filled with every stage's intermediate results (dev/trace_refusals.py)."""
+        tr = _trace if _trace is not None else {}
         si = self._snapshot_for(as_of)
+        tr["snap"] = si
         if si is None:
             return Answer(text=REFUSAL, confident=False)
         qtoks = tokens(question)
         qnums = question_numbers(question)
         shape = answer_shape(question)
+        tr.update(qtoks=qtoks, qnums=qnums, shape=shape)
 
         # Stage A: which pages are about the question (title + all their text) and hold an answer of
         # the right shape (times for an hours question, a % on a rate page for a rate question...).
@@ -402,9 +406,11 @@ class KnowledgeBase:
                 if shape in self.pages[pg][2]:
                     pcov[pg] += pidf[t] / ptotal
         best_page = max(pcov.values(), default=0.0)
+        tr.update(pcov=dict(pcov), best_page=best_page)
         if best_page < 0.5:
             return Answer(text=REFUSAL, confident=False)
         pages = {pg for pg, c in pcov.items() if c >= 0.75 * best_page}
+        tr["pages"] = pages
 
         # Stage B: passages on those pages. Their own words count fully, the page title at half (Q4).
         index, n = self.index[si], max(1, self.n_passages[si])
@@ -413,7 +419,8 @@ class KnowledgeBase:
         # D9: the question's most specific word (rarest non-generic word the site uses at all, e.g.
         # "construction", "Mullan") must be in the passage or its page title. Otherwise it's a near miss.
         specific = [t for t in qtoks if t not in GENERIC and index.get(t)]
-        anchor = max(specific, key=lambda t: idf[t]) if specific else None
+        anchor = max(specific, key=lambda w: idf[w]) if specific else None
+        tr.update(anchor=anchor, idf=idf)
         score = {}
         for t in qtoks:
             for pid in index.get(t, ()):
@@ -430,6 +437,7 @@ class KnowledgeBase:
                 score[pid] = (own + 0.5 * from_title) / total
         best = max(score.values(), default=0.0)
         cands = [pid for pid, s in score.items() if s >= max(0.35, best - 0.15)]
+        tr.update(score=score, cutoff=max(0.35, best - 0.15), cands=cands)
         if not cands:
             return Answer(text=REFUSAL, confident=False)
 
@@ -439,6 +447,7 @@ class KnowledgeBase:
             return (KIND_RANK[p.kind], newest_first, -round(score[pid], 2), p.url, pid)
 
         win_id = min(cands, key=rank)
+        tr["winner"] = win_id
         win = self.passages[win_id]
         sid, taken_on = self.snaps[si]
         if win.table >= 0:

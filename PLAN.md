@@ -56,3 +56,74 @@ Changed item scores: {"practice": {"t1": [0.0, 1.0], "t2": [0.0, 1.0], "t1b": [0
 
 Command: `python3 dev/run_build_checks.py q1_units --previous baseline`. Per-item scores unchanged on Dupaco; reworded final increased through consistency, not correctness.
 
+### Rejected Q2 display variant (`q2`)
+
+Historical fallback passed practice, but changing normal current answers to dated display reduced paraphrase consistency and final score. Restore existing current-answer display; keep dates only for explicit as-of and fallback answers.
+
+Command: `python3 dev/run_build_checks.py q2 --previous q1_units` (all five checks listed above).
+
+Public / reworded / must-refuse / practice / conflict F1: 0.7736 / 0.7284 / 17/18 / 1.0 / 0.7586; resolution 1.0; conflict negatives 0/8.
+
+Changed item scores: {"practice": {"t3": [0.0, 1.0]}}.
+
+Stale hits / errors: {"public": [0, 0], "reworded": [0, 0], "refusal": [0, 0], "practice": [0, 0]}. Newly answered refusals: {}.
+
+### Rejected Q2 incomplete guard (`q2_final`)
+
+All five scored benchmarks passed, but independent synthetic review found a withdrawal at a different URL could resurrect an older rate because page coverage was shape-filtered. Add subject-presence checks independent of answer shape; do not retain until the new withdrawal fixture passes.
+
+Command: `python3 dev/run_build_checks.py q2_final --previous q1_units` (all five checks listed above).
+
+Public / reworded / must-refuse / practice / conflict F1: 0.7736 / 0.73 / 17/18 / 1.0 / 0.7586; resolution 1.0; conflict negatives 0/8.
+
+Changed item scores: {"practice": {"t3": [0.0, 1.0]}}.
+
+Stale hits / errors: {"public": [0, 0], "reworded": [0, 0], "refusal": [0, 0], "practice": [0, 0]}. Newly answered refusals: {}.
+
+### Superseded Q2 guard checkpoint (`q2_safe`)
+
+Shape-independent subject guard added; five checks passed. Subsequently broadened explicit expiry vocabulary and added family-level withdrawal protection.
+
+Command: `python3 dev/run_build_checks.py q2_safe --previous q1_units` (all five checks listed above).
+
+Public / reworded / must-refuse / practice / conflict F1: 0.7736 / 0.73 / 17/18 / 1.0 / 0.7586; resolution 1.0; conflict negatives 0/8.
+
+Changed item scores: {"practice": {"t3": [0.0, 1.0]}}.
+
+Stale hits / errors: {"public": [0, 0], "reworded": [0, 0], "refusal": [0, 0], "practice": [0, 0]}. Newly answered refusals: {}.
+
+### Superseded Q2 expiry checkpoint (`q2_expiry`)
+
+Explicit validity and expiry language excludes historical offers; five checks passed. Final version also blocks family-level withdrawal notices and removes missing-current conflict resolutions.
+
+Command: `python3 dev/run_build_checks.py q2_expiry --previous q1_units` (all five checks listed above).
+
+Public / reworded / must-refuse / practice / conflict F1: 0.7736 / 0.73 / 17/18 / 1.0 / 0.7586; resolution 1.0; conflict negatives 0/8.
+
+Changed item scores: {"practice": {"t3": [0.0, 1.0]}}.
+
+Stale hits / errors: {"public": [0, 0], "reworded": [0, 0], "refusal": [0, 0], "practice": [0, 0]}. Newly answered refusals: {}.
+
+### Superseded Q2 withdrawal checkpoint (`q2_kept`)
+
+Five checks passed; final Q2 also removes current resolutions for facts absent from the latest snapshot.
+
+Command: `python3 dev/run_build_checks.py q2_kept --previous q1_units` (all five checks listed above).
+
+Public / reworded / must-refuse / practice / conflict F1: 0.7736 / 0.73 / 17/18 / 1.0 / 0.7586; resolution 1.0; conflict negatives 0/8.
+
+Changed item scores: {"practice": {"t3": [0.0, 1.0]}}.
+
+Stale hits / errors: {"public": [0, 0], "reworded": [0, 0], "refusal": [0, 0], "practice": [0, 0]}. Newly answered refusals: {}.
+
+### Kept Q2 (`q2_complete`)
+
+All19 synthetic cases pass, including different-URL withdrawal, expired offer, changed fee, date boundaries, missing current fact has no current resolution, and ingest cache refresh. Independent review passed. Only practice t3 score changed; current Dupaco answers preserve existing display.
+
+Command: `python3 dev/run_build_checks.py q2_complete --previous q1_units` (all five checks listed above).
+
+Public / reworded / must-refuse / practice / conflict F1: 0.7736 / 0.73 / 17/18 / 1.0 / 0.7586; resolution 1.0; conflict negatives 0/8.
+
+Changed item scores: {"practice": {"t3": [0.0, 1.0]}}.
+
+Stale hits / errors: {"public": [0, 0], "reworded": [0, 0], "refusal": [0, 0], "practice": [0, 0]}. Newly answered refusals: {}.

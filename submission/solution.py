@@ -474,9 +474,61 @@ class KnowledgeBase:
         return order[k - 1] if k else None
 
     def answer(self, question: str, as_of=None, _trace=None) -> Answer:
+        """Prefer selected-snapshot evidence; missing pages may supply dated history."""
+        tr = _trace if _trace is not None else {}
+        selected = self._snapshot_for(as_of)
+        ans = self._answer_snapshot(question, selected, tr)
+        if ans.confident and not as_of:
+            ans.text = ans.text.replace(f"(as of {self.snaps[selected][1]}):", "(currently):", 1)
+        if ans.confident or selected is None:
+            return ans
+        # A failed eligibility/shape/qualifier/ranking check is not absence of evidence.
+        # Keep this deliberately conservative: plausible current subject pages block history.
+        if tr.get("best_page", 0) >= 0.5:
+            return ans
+        subject = tokens(question) - GENERIC - WORDING - ANSWER_KIND
+        current_pages = {p.page for p in self.passages if p.snap == selected}
+        if subject and any(subject <= self.pages[pg][1] for pg in current_pages):
+            # A withdrawal or unavailable-product notice need not have the requested shape.
+            return ans
+        qfam = _family_of(canonical(question)) if answer_shape(question) == "rate" else ""
+        if qfam and any(p.snap == selected and _family_of(p.text) == qfam
+                        and re.search(r"withdrawn|discontinued|no longer (?:available|offered|published)", p.text, re.I)
+                        for p in self.passages):
+            return ans
+        if qfam and any(f == qfam or CATEGORY.get(f) == qfam for f in self._family_index()[selected][0]):
+            return ans
+        limit = self.snaps[selected][1]
+        for old in sorted((i for i, (_, d) in enumerate(self.snaps) if d < limit),
+                          key=lambda i: self.snaps[i][1], reverse=True):
+            past_trace = {}
+            past = self._answer_snapshot(question, old, past_trace)
+            if not past.confident:
+                continue
+            win = self.passages[past_trace["winner"]]
+            # Never resurrect an earlier version when any later version of its page exists,
+            # including withdrawal notices or a different published tier/measure.
+            if any(p.url == win.url and self.snaps[old][1] < self.snaps[p.snap][1] <= limit
+                   for p in self.passages):
+                continue
+            if win.kind not in ("rates", "product", "other"):
+                continue
+            page_text = " ".join(p.text for p in self.passages if p.page == win.page)
+            if re.search(r"\b(expired|withdrawn|discontinued|superseded)\b|no longer (?:available|offered|published)"
+                         r"|\bexpires?\b|\bvalid (?:until|through)\b|\bavailable until\b"
+                         r"|offer (?:ended|ends)|promotion (?:ended|ends)", page_text, re.I):
+                continue
+            observed = self.snaps[old][1]
+            body = past.text.split("\n", 1)[-1].rsplit("\nSource:", 1)[0]
+            tr.update(past_trace, historical=True, selected_snapshot=selected)
+            return Answer(text=f"The selected snapshot ({limit}) doesn't publish this information. "
+                          f"Last observed on {observed}:\n{body}\n"
+                          f"I can't confirm the current value.\nSource: {win.url}", sources=past.sources)
+        return ans
+
+    def _answer_snapshot(self, question: str, si, _trace=None) -> Answer:
         """_trace: optional dict filled with every stage's intermediate results (dev/trace_refusals.py)."""
         tr = _trace if _trace is not None else {}
-        si = self._snapshot_for(as_of)
         tr["snap"] = si
         if si is None:
             return Answer(text=REFUSAL, confident=False)
@@ -624,7 +676,7 @@ class KnowledgeBase:
             body = " ... ".join(parts)
             body = body if len(body) <= 900 else body[:900].rsplit(" ", 1)[0] + " ..."
         body = expand_providers(body)
-        when = f"as of {taken_on}" if as_of else "currently"
+        when = f"as of {taken_on}"
         text = f"{win.title or 'Dupaco'} ({when}):\n{body}\nSource: {win.url}"
         return Answer(text=text, sources=sources)
 
@@ -701,7 +753,8 @@ class KnowledgeBase:
                           f"(rate page > product > promo > calculator > article)")
             reports.append(((kind, tuple(values)), Conflict(
                 topic=f"{segment} {group} rates ({label})", values=values, sources=sources,
-                resolution="; ".join(f"{f['row']}: {f['resolution']}" for f in fs), reason=reason)))
+                resolution="; ".join(f"{f['row']}: {f['resolution']}" for f in fs
+                                     if f['resolution'] is not None) or None, reason=reason)))
         return _merge_copies(reports) + self._article_conflicts()
 
     def _article_conflicts(self) -> list[Conflict]:
@@ -771,6 +824,7 @@ class KnowledgeBase:
                 return p, pages[p][s]
             cur_page, cur = best(present[-1])
             cur_src = Source(url=cur_page[1], snapshot_id=self.snaps[present[-1]][0])
+            resolution = _show(cur) if present[-1] == order[-1] else None
             # 1) history on the reference page
             changes = []
             for s in order:
@@ -778,7 +832,7 @@ class KnowledgeBase:
                 if v is not None and (not changes or _differs(v, changes[-1][1])):
                     changes.append((s, v))
             if len(changes) > 1:
-                yield dict(base, kind="history", values=[_show(v) for _, v in changes], resolution=_show(cur),
+                yield dict(base, kind="history", values=[_show(v) for _, v in changes], resolution=resolution,
                            sources=[Source(url=ref[1], snapshot_id=self.snaps[s][0]) for s, _ in changes],
                            pages=[urlparse(ref[1]).path], dates=[self.snaps[s][1] for s, _ in changes[1:]])
             # 2) disagreement inside one snapshot
@@ -792,7 +846,7 @@ class KnowledgeBase:
                         refs.add(_show(ref_v))
             values = [_show(cur)] + sorted(({v for _, v in dissent} | refs) - {_show(cur)})
             if dissent and len(values) > 1:
-                yield dict(base, kind="disagreement", values=values, resolution=_show(cur),
+                yield dict(base, kind="disagreement", values=values, resolution=resolution,
                            sources=[cur_src] + [Source(url=u, snapshot_id=self.snaps[s][0])
                                                 for (u, _), s in sorted(dissent.items())],
                            pages=[urlparse(cur_page[1]).path], stale=sorted({urlparse(u).path for u, _ in dissent}))

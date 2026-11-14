@@ -153,10 +153,21 @@ def answer_shape(question: str) -> str:
     return "any"
 
 
-def passage_shapes(kind: str, text: str) -> frozenset:
+RATE_WORD = re.compile(r"\b(rates?|apr|apy|annual percentage|dividends?|yield|interest)\b", re.I)
+
+
+def is_rate(text: str, cells=()) -> bool:
+    """A % is a rate only when labelled as one: in a table, under a rate/APR/APY/dividend column;
+    in prose, in a sentence that names a rate. "Borrow up to 80% of construction costs" is not a rate."""
+    if cells:
+        return any("%" in v and (_measure(h) or RATE_WORD.search(h)) for h, v in cells)
+    return any("%" in sent and RATE_WORD.search(sent) for sent in re.split(r"(?<=[.!?])\s+|\s·\s", text))
+
+
+def passage_shapes(kind: str, text: str, cells=()) -> frozenset:
     """The answer shapes a passage can satisfy; computed once at ingest."""
     s = {"any", "link"}
-    if kind in RATE_KINDS and "%" in text:
+    if kind in RATE_KINDS and is_rate(text, cells):
         s.add("rate")
     if kind in RATE_KINDS and re.search(r"\$\s?\d", text):
         s.add("fee")
@@ -366,7 +377,7 @@ class KnowledgeBase:
                 if len(text) < 3:
                     continue
                 toks = frozenset(tokens(f"{caption} {text}"))
-                shapes = passage_shapes(kind, text)
+                shapes = passage_shapes(kind, text, cells if table >= 0 else ())
                 p = Passage(si, page.url, title, kind, date, text, toks, pg, shapes, table, label, cells)
                 pid = len(self.passages)
                 self.passages.append(p)

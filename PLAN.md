@@ -187,3 +187,15 @@ Public / reworded / must-refuse / practice / conflict F1: 0.7969 / 0.7528 / 17/1
 Changed item scores: {"public": {"dup-008": [0.0, 1.0]}, "reworded": {"dup-008-p1": [0.0, 1.0], "dup-008-p2": [0.0, 1.0]}}.
 
 Stale hits / errors: {"public": [0, 0], "reworded": [0, 0], "refusal": [0, 0], "practice": [0, 0]}. Newly answered refusals: {}.
+
+### Kept Q4c (`q4c`)
+
+Article observations now support answers only for matching organization-count or named recognition predicates, using selected-snapshot evidence and dated sources.36/36 synthetic cases pass; independent review passed. Public reaches0.8512; reworded0.7943. Public-reworded final-score gap0.0569 exceeds0.05: record the gate failure and stop tuning rather than add wording-specific rules. Must-refuse17/18 unchanged.
+
+Command: `python3 dev/run_build_checks.py q4c --previous q4b_scope` (all five checks listed above).
+
+Public / reworded / must-refuse / practice / conflict F1: 0.8512 / 0.7943 / 17/18 / 1.0 / 0.7586; resolution 1.0; conflict negatives 0/8.
+
+Changed item scores: {"public": {"dup-073": [0.0, 1.0], "dup-087": [0.0, 1.0]}, "reworded": {"dup-073-p2": [0.0, 1.0], "dup-087-p1": [0.0, 1.0], "dup-087-p2": [0.0, 1.0]}}.
+
+Stale hits / errors: {"public": [0, 0], "reworded": [0, 0], "refusal": [0, 0], "practice": [0, 0]}. Newly answered refusals: {}.

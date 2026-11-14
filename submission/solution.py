@@ -413,6 +413,7 @@ def split_page(md: str):
 class KnowledgeBase:
     def __init__(self):
         self._fact_index = None
+        self._article_cache = {}
         self.snaps: list[tuple[str, str]] = []         # (snapshot_id, taken_on), oldest first
         self.passages: list[Passage] = []
         self.index: list[dict[str, list[int]]] = []    # per snapshot: token -> passage ids
@@ -426,6 +427,7 @@ class KnowledgeBase:
         self.snaps.append((snapshot.snapshot_id, snapshot.taken_on))
         self._fact_index = None    # facts across pages, built on first use after the last ingest
         self._fam_index = None
+        self._article_cache.clear()
         index: dict[str, list[int]] = defaultdict(list)
         page_index: dict[str, list[int]] = defaultdict(list)
         start = len(self.passages)
@@ -539,6 +541,10 @@ class KnowledgeBase:
         tr.update(qtoks=qtoks, qnums=qnums, shape=shape)
         if not qtoks:
             return Answer(text=REFUSAL, confident=False)
+        if shape in ("count", "any"):
+            article = self._article_answer(question, si, tr)
+            if article is not None:
+                return article
         if shape == "link":
             linked = self._labeled_link(question, si, tr)
             if linked is not None:
@@ -848,36 +854,81 @@ class KnowledgeBase:
                                      if f['resolution'] is not None) or None, reason=reason)))
         return _merge_copies(reports) + self._article_conflicts()
 
-    def _article_conflicts(self) -> list[Conflict]:
-        """D10 for article text: organisation-wide counts that newsroom articles state differently.
-
-        Each observation preserves value, publication date, snapshot and source. Different publication
-        dates are not proof that an article was erroneous. Two bounded patterns: branch-office counts,
-        and "the Nth time <awarder> recognized
-        Dupaco" (kept apart per award program, taken from the article title)."""
+    def _article_observations(self, si=None):
+        """Shared count facts, retaining entity/program, publication date, snapshot and passage."""
+        if si in self._article_cache:
+            return self._article_cache[si]
         newest = {}                        # url -> passages of its newest snapshot
         for p in self.passages:
-            if p.kind == "article" and p.date:
+            if p.kind == "article" and p.date and (si is None or p.snap == si):
                 if p.url not in newest or self.snaps[p.snap][1] > self.snaps[newest[p.url][0].snap][1]:
                     newest[p.url] = [p]
                 elif self.snaps[p.snap][1] == self.snaps[newest[p.url][0].snap][1]:
                     newest[p.url].append(p)
-        obs = defaultdict(dict)            # fact -> url -> (date, value)
+        obs = defaultdict(dict)
+        pids = {id(p): i for i, p in enumerate(self.passages)}
         for url, ps in newest.items():
             for p in ps:
                 for m in BRANCH_COUNT.finditer(p.text):
-                    obs[("Number of Dupaco branch offices", "")][url] = (p.date, m.group(1), p.snap)
+                    obs[("Number of Dupaco branch offices", "")][url] = (p.date, m.group(1), p.snap, pids[id(p)])
                 for m in TIMES_RECOGNIZED.finditer(p.text):
                     program = re.sub(r"\s+", " ", p.title.lower()).strip()
-                    obs[(f"Times {m.group(2)} has recognized Dupaco", program)][url] = (p.date, m.group(1).lower(), p.snap)
+                    obs[(f"Times {m.group(2)} has recognized Dupaco", program)][url] = (p.date, m.group(1).lower(), p.snap, pids[id(p)])
+        self._article_cache[si] = obs
+        return obs
+
+    def _article_answer(self, question: str, si: int, trace: dict):
+        """Answer only recognized organisation-count or named award-program predicates."""
+        words = tokens(DATE_SPAN.sub(" ", question))
+        branch = bool(re.search(r"how many|number of|count of", question, re.I)
+                      and "branch" in words)
+        recognition = bool(words & tokens("recognition recognized received awards ranked ranking won times"))
+        if not branch and not recognition:
+            return None
+        observations = self._article_observations(si)
+        matches = []
+        for (topic, program), seen in observations.items():
+            if not program:
+                if not branch or words - GENERIC - tokens("count total operate operates operating"):
+                    continue  # No state, branch, employee or other-scope substitutions.
+            else:
+                awarder = tokens(topic.split()[1])
+                if not recognition or not awarder <= words:
+                    continue
+                predicate = tokens("recognition recognized recognize received receive awards ranked rank ranking won win times")
+                if words - GENERIC - predicate - tokens(program):
+                    continue
+            eligible = [(url, record) for url, record in seen.items()
+                        if record[0] <= self.snaps[si][1]]
+            if not eligible:
+                continue
+            latest = max(record[0] for _, record in eligible)
+            latest_rows = [(url, record) for url, record in eligible if record[0] == latest]
+            if len({record[1] for _, record in latest_rows}) != 1:
+                continue  # A tied publication date cannot resolve differing counts.
+            url, (date, value, snap, pid) = min(latest_rows, key=lambda entry: entry[0])
+            matches.append((topic, program, url, date, value, snap, pid))
+        if not matches:
+            return None
+        sources, lines = [], []
+        for topic, program, url, date, value, snap, pid in sorted(matches):
+            lines.append(f"{topic}{' (' + program + ')' if program else ''}: {value}. "
+                         f"Latest article found was published {date}.")
+            sources.append(Source(url=url, snapshot_id=self.snaps[snap][0], quote=self.passages[pid].text[:250]))
+        trace.update(winner=matches[0][-1], article_answer=True)
+        return Answer(text="\n".join(lines) + "\nSources: " + ", ".join(s.url for s in sources), sources=sources)
+
+    def _article_conflicts(self) -> list[Conflict]:
+        """Dated observations are not proof that older articles were erroneous."""
+        obs = self._article_observations()
         out = []
         for (topic, program), seen in obs.items():
             dated = sorted(seen.items(), key=lambda kv: kv[1][0], reverse=True)   # newest article first
-            values = list(dict.fromkeys(v for _, (_, v, _) in dated))
+            values = list(dict.fromkeys(v for _, (_, v, _, _) in dated))
             if len(values) < 2:
                 continue
             first = {}
-            for url, (date, v, snap) in dated:
+            for url, (date, v, snap, _) in dated:
                 first.setdefault(v, (date, url, snap))
             out.append(Conflict(
                 topic=f"{topic}{' (' + program + ')' if program else ''} (newsroom articles disagree)",

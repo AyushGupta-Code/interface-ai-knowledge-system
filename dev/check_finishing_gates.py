@@ -189,6 +189,58 @@ def synthetic_checks(submission: Path) -> list[tuple[str, bool, str]]:
     answer = build(submission, [snapshot(latest, [wrong_term])]).answer("What is the 6-month certificate APY?")
     checks.append(("title-only match preserves numeric qualifiers", not answer.confident,
                    "the title's term and a percentage cannot replace the passage's actual term"))
+    # Article-answer predicates share the extractor used for conflict observations.
+    count_system = build(submission, [snapshot(first, [earlier_article]),
+                                      snapshot(latest, [earlier_article, later_article])])
+    trace = {}
+    answer = count_system.answer("How many branches does Dupaco have?", _trace=trace)
+    checks.append(("article branch answer selects latest dated observation", bool(trace.get("article_answer"))
+                   and "7" in answer.text and "2026-02-15" in answer.text
+                   and any(s.url == later_article.url and s.snapshot_id == "fixture_" + latest for s in answer.sources),
+                   "organization count carries publication date and selected-snapshot source"))
+    trace = {}
+    count_system.answer("How many branches does Dupaco have in Iowa?", _trace=trace)
+    checks.append(("article branch answer does not substitute organization total for state count",
+                   not trace.get("article_answer"),
+                   "new article-fact path rejects scope it cannot establish; legacy retrieval is separate"))
+    tied_article = page("/newsroom/other-branch-report", "Branch Report",
+                        "# Branch Report\n\nFeb 15, 2026\n\nAbout Dupaco. It has 8 branch office locations.")
+    tied_system = build(submission, [snapshot(latest, [later_article, tied_article])])
+    trace = {}
+    tied_system.answer("How many branches does Dupaco have?", _trace=trace)
+    checks.append(("tied article dates cannot resolve differing organization counts", not trace.get("article_answer"),
+                   "same publication date with different values has no automatic latest winner"))
+    award_first = page("/newsroom/earlier-forbes-report", "Forbes Recognition Program",
+                       "# Forbes Recognition Program\n\nJan 4, 2026\n\nThis was the fourth time Forbes recognized Dupaco for its contribution to the communities that its members call home.")
+    award_latest = page("/newsroom/later-forbes-report", "Forbes Recognition Program",
+                        "# Forbes Recognition Program\n\nFeb 15, 2026\n\nThis was the fifth time Forbes recognized Dupaco for its contribution to the communities that its members call home.")
+    award_system = build(submission, [snapshot(first, [award_first]), snapshot(latest, [award_first, award_latest])])
+    award_question = "How many times has Forbes recognized Dupaco?"
+    for name, date, expected, source in [
+        ("article recognition answer preserves earlier publication", first, "fourth", award_first),
+        ("article recognition answer selects latest publication", None, "fifth", award_latest),
+    ]:
+        trace = {}
+        answer = award_system.answer(award_question, date, _trace=trace)
+        publication = "2026-01-04" if date else "2026-02-15"
+        checks.append((name, bool(trace.get("article_answer")) and expected in answer.text
+                       and publication in answer.text
+                       and any(s.url == source.url and s.quote and s.quote in source.markdown
+                               and expected in s.quote for s in answer.sources),
+                       "ordinal, publication date and verbatim supporting quote remain together"))
+    trace = {}
+    award_system.answer("How many times has Forbes recognized Dupaco for customer service?", _trace=trace)
+    checks.append(("article answer rejects unsupported award program", not trace.get("article_answer"),
+                   "matching awarder alone cannot establish a different program"))
+    cache_system = build(submission, [snapshot(first, [earlier_article])])
+    before = cache_system.answer("How many branches does Dupaco have?")
+    cache_system.conflicts()
+    cache_system.ingest(snapshot(latest, [earlier_article, later_article]))
+    trace = {}
+    after = cache_system.answer("How many branches does Dupaco have?", _trace=trace)
+    checks.append(("article observation cache refreshes after ingest", "9" in before.text
+                   and bool(trace.get("article_answer")) and "7" in after.text and "2026-02-15" in after.text,
+                   "new snapshot refreshes shared answer/conflict article observations"))
     return checks
 
 

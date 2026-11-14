@@ -6,7 +6,8 @@ ingest():  every page of every snapshot is split into passages (a paragraph, or 
 answer():  pick the snapshot by date (D4) -> find passages covering the question -> check the
            question's qualifiers (numbers) against each passage (D9) -> authority first (D6) ->
            answer with every matching row of the winning table (D7), or the winning paragraph.
-conflicts(): the same table row (caption + label + column) showing different values (D10).
+conflicts(): the same rate fact (segment + product + tier/term + measure) with different values,
+             either across snapshots (history) or across pages in one snapshot (disagreement) (D10).
 """
 import math
 import re
@@ -246,7 +247,7 @@ class Passage:
     page: int = -1     # index into self.pages
     shapes: frozenset = frozenset()  # answer shapes this passage can satisfy
     table: int = -1    # table id within the page for table rows, -1 otherwise
-    label: str = ""    # caption + row label, for conflicts
+    label: str = ""    # table caption (heading + labels above the table), for conflict identity
     cells: tuple = ()  # (header, value) pairs for table rows
 
 
@@ -347,9 +348,8 @@ class KnowledgeBase:
                 text = clean(text)
                 if table >= 0:
                     cells = tuple((clean(h), clean(v)) for h, v in cells)
-                    label = " ".join(v for h, v in cells if not re.search(r"\d", v))[:120] or cells[0][1]
                     text = f"{caption + ': ' if caption else ''}" + "; ".join(f"{h}: {v}" if h else v for h, v in cells if v)
-                    label = f"{caption} / {label}".strip(" /")
+                    label = caption
                 else:
                     label = ""
                 if len(text) < 3:
@@ -455,28 +455,254 @@ class KnowledgeBase:
 
     # -----------------------------------------------------------------------------------------
     def conflicts(self) -> list[Conflict]:
-        """D10: same caption/row/column with different values, within or across snapshots."""
-        seen = defaultdict(lambda: defaultdict(list))  # (label, header) -> value -> [(snap, kind, url)]
-        for p in self.passages:
-            if p.table < 0 or p.kind not in ("rates", "product", "promo", "calculator"):
-                continue
-            for h, v in p.cells:
-                m = re.fullmatch(r"\d+(?:\.\d+)?%", v.strip())
-                if m and h:
-                    seen[(p.label, h)][v.strip()].append((p.snap, p.kind, p.url))
+        """D10: one rate fact (segment + product + tier/term), compared measure by measure.
+
+        Two kinds, reported separately and named in `reason`:
+        - history: the fact's value on its reference page changed between snapshots;
+        - disagreement: in one snapshot, two pages show different values for the same fact
+          (typically a stale calculator, promo or guidance page).
+        Balance tiers, terms, APR vs APY and personal vs business products are different facts,
+        so they are never compared with each other.
+        """
+        order = sorted(range(len(self.snaps)), key=lambda i: self.snaps[i][1])
+        age = {s: len(order) - 1 - i for i, s in enumerate(order)}    # 0 = newest snapshot
+        facts = defaultdict(list)          # fact -> [(snap, rank, url, measure, value)]
+        topics = {}                        # fact -> readable topic, worded as the newest, most authoritative row
+        for key, measure, snap, kind, url, value, topic in self._facts():
+            facts[key].append((snap, KIND_RANK[kind], url, measure, value))
+            rank = (KIND_RANK[kind], age[snap])
+            if key not in topics or rank < topics[key][0]:
+                topics[key] = (rank, topic)
         out = []
-        latest = self._snapshot_for(None)
-        for (label, h), vals in seen.items():
-            if len(vals) < 2:
+        for key, obs in facts.items():
+            if min(r for _, r, *_ in obs) > KIND_RANK["product"]:
+                continue                   # identity is trusted only when a rate or product page states it
+            topic = topics[key][1]
+            pages = defaultdict(lambda: defaultdict(dict))   # (rank, url) -> snap -> measure -> value
+            for snap, rank, url, m, v in obs:
+                pages[(rank, url)][snap][m] = v
+            ref = min(pages, key=lambda p: (p[0], -len(pages[p]), p[1]))
+            present = [s for s in order if any(s in pages[p] for p in pages)]
+            def best(s):                   # most authoritative page showing the fact in snapshot s
+                p = ref if s in pages[ref] else min(q for q in pages if s in pages[q])
+                return p, pages[p][s]
+            cur_page, cur = best(present[-1])
+            cur_src = Source(url=cur_page[1], snapshot_id=self.snaps[present[-1]][0])
+            # 1) history on the reference page
+            changes = []
+            for s in order:
+                v = pages[ref].get(s)
+                if v is not None and (not changes or _differs(v, changes[-1][1])):
+                    changes.append((s, v))
+            if len(changes) > 1:
+                out.append(Conflict(
+                    topic=f"{topic} (changed over time)",
+                    values=[_show(v) for _, v in changes],
+                    sources=[Source(url=ref[1], snapshot_id=self.snaps[s][0]) for s, _ in changes],
+                    resolution=_show(cur),
+                    reason=f"history on {urlparse(ref[1]).path}: "
+                           + " -> ".join(f"{_show(v)} ({self.snaps[s][1]})" for s, v in changes)
+                           + "; the newest snapshot's value is current, older values are not contradictions"))
+            # 2) disagreement inside one snapshot
+            dissent, refs = {}, set()      # (url, shown value) -> newest snapshot showing it
+            for s in present:
+                (_, ref_url), ref_v = best(s)
+                for (rank, url), snaps in pages.items():
+                    v = snaps.get(s)
+                    if v is not None and url != ref_url and _differs(v, ref_v):
+                        dissent[(url, _show(v))] = s
+                        refs.add(_show(ref_v))
+            values = [_show(cur)] + sorted(({v for _, v in dissent} | refs) - {_show(cur)})
+            if dissent and len(values) > 1:
+                where = sorted({urlparse(u).path for u, _ in dissent})
+                out.append(Conflict(
+                    topic=f"{topic} (pages disagree)",
+                    values=values,
+                    sources=[cur_src] + [Source(url=u, snapshot_id=self.snaps[s][0])
+                                         for (u, _), s in sorted(dissent.items())],
+                    resolution=_show(cur),
+                    reason=f"disagreement: {', '.join(where)} show a different value than "
+                           f"{urlparse(cur_page[1]).path} in the same snapshot; the most authoritative "
+                           f"page in the newest snapshot wins (rate page > product > promo > calculator > article)"))
+        return _merge_copies(out)
+
+    def _facts(self):
+        """Yield (fact key, measure, snap, kind, url, value, topic) for each rate cell of each table row."""
+        tables = defaultdict(list)
+        for p in self.passages:
+            if p.table >= 0 and p.kind != "file" and p.cells:
+                tables[(p.snap, p.url, p.table)].append(p)
+        parsed, named = [], defaultdict(set)
+        for (snap, url, _), rows in tables.items():
+            if not any(_measure(h) for h, _ in rows[0].cells):
                 continue
-            def strength(item):
-                v, where = item
-                return max((s == latest, -KIND_RANK[k]) for s, k, _ in where)
-            winner = max(vals.items(), key=strength)[0]
-            srcs = [Source(url=u, snapshot_id=self.snaps[s][0]) for v in vals for s, _, u in vals[v][:1]]
-            out.append(Conflict(topic=f"{label} {h}", values=sorted(vals), sources=srcs, resolution=winner,
-                                reason="value on the most authoritative page in the newest snapshot"))
-        return out
+            caption = rows[0].label
+            segment = "Business" if "/business" in url.lower() or "business" in caption.lower() else "Personal"
+            years = {}                     # model-year label -> position in this table (0 = newest years)
+            items = []
+            for p in rows:
+                name, quals, shown, vals = "", [], [], {}
+                for h, v in p.cells:
+                    m = _measure(h)
+                    if not v or IGNORED_COL.search(h):
+                        continue
+                    if m:
+                        if _value(v) is not None:
+                            vals[m] = _value(v)
+                    elif PRODUCT_COL.fullmatch(h.strip().lower()):
+                        name = v
+                    elif MODEL_YEAR.search(v):
+                        quals.append(f"model-year tier {years.setdefault(v, len(years))}")
+                        shown.append(v)
+                    else:
+                        quals.append(_qual(v))
+                        shown.append(v)
+                if name.lower().startswith("business ") or "(business)" in name.lower():
+                    segment = "Business"
+                name = re.sub(r"\s*\(business\)|^business\s+", "", name, flags=re.I).strip(" —-")
+                if vals:
+                    items.append((name, tuple(quals), " ".join(shown), vals))
+            if not items:
+                continue
+            family = _family(rows, items, caption, url)
+            if not family:
+                continue
+            for name in {n for n, *_ in items if n}:
+                named[(segment, family, frozenset(q for n, q, *_ in items if n == name))].add(name)
+            parsed.append((snap, rows[0].kind, url, segment, family, items))
+        for snap, kind, url, segment, family, items in parsed:
+            if not any(n for n, *_ in items):
+                # No product column: borrow the name of the one named table with the same tiers.
+                same = named.get((segment, family, frozenset(q for _, q, *_ in items)), set())
+                if len(same) == 1:
+                    items = [(next(iter(same)),) + it[1:] for it in items]
+                elif family in NAMED_FAMILIES:
+                    continue               # several products share these tiers: identity unknown
+            for name, quals, shown, vals in items:
+                product = _product(name, family)
+                key = (segment, family, name.lower(), quals)
+                topic = " ".join(x for x in [segment, product, shown] if x)
+                for m, v in vals.items():
+                    yield key, m, snap, kind, url, v, topic
+
+
+# Conflict identity helpers (D10) ---------------------------------------------------------------
+def _merge_copies(conflicts: list) -> list:
+    """One rate published under several products (personal and business certificate, Roth and
+    Traditional IRA) changes as one event: conflicts with identical values become one entry."""
+    groups = {}
+    for c in conflicts:
+        kind = c.topic[c.topic.rindex(" ("):]
+        groups.setdefault((kind, tuple(c.values)), []).append(c)
+    out = []
+    for (kind, _), cs in groups.items():
+        first = cs[0]
+        if len(cs) > 1:
+            first.topic = "; ".join(c.topic[: -len(kind)] for c in cs) + kind
+            seen = {(s.url, s.snapshot_id) for s in first.sources}
+            first.sources += [s for c in cs[1:] for s in c.sources if (s.url, s.snapshot_id) not in seen]
+        out.append(first)
+    return out
+
+
+PRODUCT_COL = re.compile(r"account type|ira type|card type|product")
+IGNORED_COL = re.compile(r"min\.? to|points|payment", re.I)
+MODEL_YEAR = re.compile(r"model year|(?:19|20)\d\d\s*[-–]\s*(?:\d\d){1,2}\b", re.I)
+NAMED_FAMILIES = {"Savings", "Checking", "Money Market", "Health Savings Account"}
+FAMILIES = [
+    (r"\bira\b|roth|traditional:", "IRA"),
+    (r"certificate", "Certificate"),
+    (r"auto|motorcycle|vehicle", "Auto & Motorcycle Loan"),
+    (r"boat|\brv\b", "Boat & RV Loan"),
+    (r"\batv\b|snowmobile|jet ski", "ATV, Snowmobile & Jet Ski Loan"),
+    (r"personal loan", "Personal Loan"),
+    (r"home improvement", "Home Improvement Loan"),
+    (r"heloc|line of credit", "Home Equity Line of Credit"),
+    (r"home equity", "Home Equity Loan"),
+    (r"refinanc", "Home Loan Refinance"),
+    (r"home loan|mortgage|homebuying|purchase:", "Home Loan"),
+    (r"rewards visa", "Rewards Visa"),
+    (r"platinum visa", "Platinum Visa"),
+    (r"credit card|visa", "Credit Card"),
+    (r"money market", "Money Market"),
+    (r"health savings|\bhsa\b", "Health Savings Account"),
+    (r"checking", "Checking"),
+    (r"savings", "Savings"),
+]
+
+
+def _family_of(text: str) -> str:
+    for pat, fam in FAMILIES:
+        if re.search(pat, text, re.I):
+            return fam
+    return ""
+
+
+def _family(rows, items, caption: str, url: str) -> str:
+    """Product family, from the strongest evidence first: the product column, the table's own
+    shape (a deposit table whose rows are terms is a certificate table), the caption parts
+    nearest the table, the row labels, and finally the URL."""
+    for name, *_ in items:
+        if name and _family_of(name):
+            return _family_of(name)
+    deposit = any(m in ("APY", "dividend rate") for *_, vals in items for m in vals)
+    labels = [p.cells[0][1] for p in rows]
+    if deposit and all(re.search(r"\b\d+\s*months?\b|certificate", l, re.I) for l in labels):
+        return "IRA" if any(_family_of(l) == "IRA" for l in labels) else "Certificate"
+    for part in reversed(caption.split(" / ")):
+        if _family_of(part):
+            return _family_of(part)
+    for l in labels:
+        if _family_of(l):
+            return _family_of(l)
+    return _family_of(urlparse(url).path.replace("-", " "))
+
+
+def _product(name: str, family: str) -> str:
+    if not name:
+        return family
+    if any(w in name.lower() for w in family.lower().replace("&", " ").replace(",", " ").split()[:2]):
+        return name
+    return f"{family} {name}"
+
+
+def _measure(h: str) -> str:
+    h = h.lower()
+    if "yield" in h or "apy" in h:
+        return "APY"
+    if "dividend" in h:
+        return "dividend rate"
+    if "annual percentage rate" in h or re.search(r"\bapr\b", h):
+        return "APR"
+    if re.fullmatch(r"\W*(interest )?rate\W*", h):
+        return "rate"
+    return ""
+
+
+def _qual(v: str) -> str:
+    v = v.lower().replace("–", "-").replace("—", "-").replace(",", "").replace("$", "")
+    v = re.sub(r"\b(months?|mo)\b", "month", v)
+    v = re.sub(r"\s*-\s*", "-", v)
+    return re.sub(r"\s+", " ", v).strip()
+
+
+def _value(v: str):
+    """'5.39% APR' -> (5.39,); '12.50% – 19.50%' -> (12.5, 19.5); None if the cell holds no rate."""
+    nums = re.findall(r"(\d+(?:\.\d+)?)\s*%", v)
+    return tuple(float(n) for n in nums) if nums else None
+
+
+def _differs(a: dict, b: dict) -> bool:
+    """Two observations of a fact disagree if any measure both show differs."""
+    return any(a[m] != b[m] for m in a.keys() & b.keys())
+
+
+MEASURE_ORDER = {"APY": 0, "APR": 0, "rate": 1, "dividend rate": 1}
+
+
+def _show(vals: dict) -> str:
+    return " / ".join(f"{' – '.join(f'{x:g}%' for x in v)} {m}"
+                      for m, v in sorted(vals.items(), key=lambda kv: (MEASURE_ORDER.get(kv[0], 2), kv[0])))
 
 
 def _neg(date: str) -> str:

@@ -1,0 +1,19 @@
+[
+  {"id": "n-savings-tiers", "why": "balance tiers of one product are different facts",
+   "topic_keywords": ["share savings"], "values": ["0.00%", "0.10%", "0.15%", "0.20%"]},
+
+  {"id": "n-apr-vs-apy", "why": "dividend rate and APY of the same certificate are different measures",
+   "topic_keywords": ["17 month"], "values": ["4.06%", "4.10%"]},
+
+  {"id": "n-intro-vs-regular", "why": "introductory and regular credit-card APRs are different facts",
+   "topic_keywords": ["platinum"], "values": ["2.90%", "12.50%"]},
+
+  {"id": "n-other-product-same-tier", "why": "Share Savings and Money Market at the same balance are different products",
+   "topic_keywords": ["savings", "money market"], "values": ["0.15%", "0.30%"]},
+
+  {"id": "n-model-year-tiers", "why": "different model-year tiers of the auto loan are different facts",
+   "topic_keywords": ["auto"], "values": ["5.39%", "5.64%"]},
+
+  {"id": "n-purchase-vs-refinance", "why": "purchase and refinance mortgages are different products",
+   "topic_keywords": ["30-year"], "values": ["7.29%", "7.30%"]}
+]

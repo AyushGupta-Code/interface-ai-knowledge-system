@@ -79,6 +79,7 @@ SYNONYMS = [
     (r"\bbecome a member\b|\bmembership\b", "join"),
     (r"\b(apple|google|samsung) pay\b|\bmobile wallets?\b|\btap to pay\b", "mobile wallet pay"),
     (r"\byield\b", "apy"),
+    (r"\binterest rates?\b", "rate"),     # tables say "Rate"/"APR"; "interest" only matched prose (trace: dup-011)
     (r"\b(college|university)\b", "student"),
     (r"\bvto\b", "volunteer time off"),
     (r"\bshut(?:ting)?(?: down)?\b", "close"),
@@ -175,8 +176,8 @@ def passage_shapes(kind: str, text: str, cells=()) -> frozenset:
         s.add("hours")
     if ADDRESS.search(text):
         s.add("address")
-    if re.search(r"\d", text):
-        s.add("count")
+    if re.search(r"\d|\b(?:first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth) time\b", text, re.I):
+        s.add("count")   # "the fifth time Forbes recognized" answers "how many times"
     if DATE_TEXT.search(text):
         s.add("date")
     return frozenset(s)
@@ -477,9 +478,13 @@ class KnowledgeBase:
             return Answer(text=REFUSAL, confident=False)
 
         def rank(pid):
+            # Authority first (D6); then a page whose title names the question's subject (category words
+            # like 'branch' or 'rate' don't count); then, among
+            # articles, the newest; then the passage's own score.
             p = self.passages[pid]
+            about = round(sum(idf[w] for w in (qtoks - GENERIC) & self.pages[p.page][0]) / total, 2)
             newest_first = (_neg(p.date) if p.date else "~") if p.kind == "article" else ""
-            return (KIND_RANK[p.kind], newest_first, -round(score[pid], 2), p.url, pid)
+            return (KIND_RANK[p.kind], -about, newest_first, -round(score[pid], 2), p.url, pid)
 
         win_id = min(cands, key=rank)
         tr["winner"] = win_id

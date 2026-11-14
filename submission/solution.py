@@ -654,10 +654,18 @@ class KnowledgeBase:
             # Authority first (D6); then a page whose title names the question's subject (category words
             # like 'branch' or 'rate' don't count); then, among
             # articles, the newest; then the passage's own score.
+            # A rate row from the segment the member didn't ask for (business, unless the question says
+            # business) only wins when nothing from their own segment does.
             p = self.passages[pid]
             about = round(sum(idf[w] for w in sorted((qtoks - GENERIC) & self.pages[p.page][0])) / total, 2)
             newest_first = (_neg(p.date) if p.date else "~") if p.kind == "article" else ""
-            return (KIND_RANK[p.kind], -about, newest_first, -round(score[pid], 2), p.url, pid)
+            return (KIND_RANK[p.kind], other_segment(pid), -about, newest_first, -round(score[pid], 2), p.url, pid)
+
+        wanted_segment = "Business" if re.search(r"\bbusiness\b", question, re.I) else "Personal"
+
+        def other_segment(pid):
+            fact = self._fact_index_get()[0].get(pid)
+            return int(fact is not None and fact[1][0] != wanted_segment)
 
         win_id = min(cands, key=rank)
         tr["winner"] = win_id
@@ -672,10 +680,16 @@ class KnowledgeBase:
             if fam_rows:
                 # A category question ("your credit cards") spans several tables and pages (personal and
                 # business cards): add the family's other rows that are as strong as the winner, from rate
-                # and product pages, once per fact.
+                # and product pages, once per fact, and only with the value the most authoritative page
+                # states for that fact in this snapshot (a product page left behind by a rate change must
+                # not add the old value next to the new one).
                 by_pid, by_fact = self._fact_index_get()
-                seen = {(by_pid.get(pid), tuple(sorted(by_fact[by_pid[pid]][self.passages[pid].url].items())))
-                        for pid in row_ids if pid in by_pid}
+
+                def authoritative(fact):
+                    pages = by_fact[fact]
+                    best = min(pages, key=lambda u: (KIND_RANK[page_kind(u)], u))
+                    return pages[best]
+                seen = {by_pid[pid] for pid in row_ids if pid in by_pid}
                 more = sorted((pid for pid in score if pid in fam_rows and pid not in row_ids
                                and self.passages[pid].kind in ("rates", "product")
                                and score[pid] >= score[win_id] - 1e-9),
@@ -683,7 +697,11 @@ class KnowledgeBase:
                 for pid in more:
                     if pid not in by_pid:
                         continue
-                    fact = (by_pid[pid], tuple(sorted(by_fact[by_pid[pid]][self.passages[pid].url].items())))
+                    if len(group) == 1 and other_segment(pid):
+                        continue   # "the 12-month certificate" means the member's own; "your credit cards" means all
+                    fact = by_pid[pid]
+                    if by_fact[fact][self.passages[pid].url] != authoritative(fact):
+                        continue
                     if fact not in seen and len(row_ids) < 12:
                         seen.add(fact)
                         row_ids.append(pid)

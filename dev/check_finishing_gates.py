@@ -114,6 +114,38 @@ def synthetic_checks(submission: Path) -> list[tuple[str, bool, str]]:
     checks.append(("missing current fact has no current conflict resolution", bool(historical)
                    and all(not c.resolution for c in historical),
                    "retain observed change, but absent latest fact cannot resolve as current"))
+    product_first = page("/personal/certificate", "Certificate Rates", "# Certificates\n\n6-month certificate APY: 3.10%")
+    hub_corrected = page("/rates", "Certificate Rates", "# Certificates\n\n6-month certificate APY: 3.10%")
+    provenance_system = build(submission, [snapshot(first, [rates_first, product_first]),
+                                            snapshot(latest, [hub_corrected, product_first])])
+    provenance_conflicts = provenance_system.conflicts()
+    disagreements = [c for c in provenance_conflicts if "disagreement" in c.topic.lower()]
+    expected_pair = {(rates_first.url, "fixture_" + first), (product_first.url, "fixture_" + first)}
+    checks.append(("disagreement preserves contemporaneous source pair", bool(disagreements)
+                   and all(expected_pair <= {(s.url, s.snapshot_id) for s in c.sources}
+                           and first in (c.reason or "") and rates_first.url in (c.reason or "")
+                           and product_first.url in (c.reason or "") for c in disagreements),
+                   "both differing pages cite January, although March pages agree"))
+    checks.append(("disagreement does not blame the product page", bool(disagreements)
+                   and all(not re.search(r"\bstale\b|never updated|\bincorrect\b|\bwrong\b|\berroneous\b",
+                                         c.reason or "", re.I) for c in disagreements),
+                   "page rank alone does not establish that the lower-ranked page was wrong"))
+    changes = [c for c in provenance_conflicts if "change" in c.topic.lower()]
+    checks.append(("history reports observations without effective-date claims", bool(changes)
+                   and all(first in (c.reason or "") and latest in (c.reason or "")
+                           and not re.search(r"current until|effective until|accurate until|not contradictions",
+                                             c.reason or "", re.I) for c in changes),
+                   "the observed snapshot dates do not prove an exact validity interval"))
+    earlier_article = page("/newsroom/earlier-branch-report", "Branch Report",
+                           "# Branch Report\n\nJan 4, 2026\n\nAbout Dupaco. It has 9 branch office locations.")
+    later_article = page("/newsroom/later-branch-report", "Branch Report",
+                         "# Branch Report\n\nFeb 15, 2026\n\nAbout Dupaco. It has 7 branch office locations.")
+    article_system = build(submission, [snapshot(first, [earlier_article]), snapshot(latest, [later_article])])
+    article_reports = [c for c in article_system.conflicts() if "branch" in c.topic.lower()]
+    checks.append(("removed article retains its actual observation snapshot", bool(article_reports)
+                   and any({(earlier_article.url, "fixture_" + first), (later_article.url, "fixture_" + latest)}
+                           <= {(s.url, s.snapshot_id) for s in c.sources} for c in article_reports),
+                   "a January-only article must not be cited as present in March"))
     # Parser invariants use synthetic values and exercise units without answer-key coupling.
     helpers = type(system).answer.__globals__
     question_numbers = helpers["question_numbers"]

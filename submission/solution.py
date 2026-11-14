@@ -740,17 +740,23 @@ class KnowledgeBase:
                         sources.append(src)
             pages = sorted({p for f in fs for p in f["pages"]})
             if kind == "history":
-                dates = sorted({d for f in fs for d in f["dates"]})
-                label = "changed over time"
-                reason = (f"history: {len(fs)} rate row(s) changed on {', '.join(pages)} "
-                          f"({' -> '.join(dates)}); the newest snapshot's value is current, "
-                          f"older values are not contradictions")
+                label = "Change"
+                reason = "Change observations: " + "; ".join(
+                    f"{f['row']}: " + ", ".join(f"{value} on {date} at {url}"
+                                                 for date, url, value in f["observations"])
+                    for f in fs)
             else:
-                label = "pages disagree"
-                stale = sorted({p for f in fs for p in f["stale"]})
-                reason = (f"disagreement: {', '.join(stale)} show different values than {', '.join(pages)} "
-                          f"in the same snapshot; the most authoritative page in the newest snapshot wins "
-                          f"(rate page > product > promo > calculator > article)")
+                label = "Disagreement"
+                reason = "Disagreement observations: " + "; ".join(
+                    f"{f['row']}: " + ", ".join(
+                        f"on {date}, {u1} shows {v1} while {u2} shows {v2}"
+                        for date, u1, v1, u2, v2 in f["observations"])
+                    for f in fs)
+            reason += "; " + "; ".join(
+                f"{f['row']}: latest observation {f['last_date']} at {f['last_url']}; "
+                + ("resolution follows source authority within that snapshot"
+                   if f['resolution'] is not None else "absent from latest snapshot; current value unconfirmed")
+                for f in fs)
             reports.append(((kind, tuple(values)), Conflict(
                 topic=f"{segment} {group} rates ({label})", values=values, sources=sources,
                 resolution="; ".join(f"{f['row']}: {f['resolution']}" for f in fs
@@ -760,9 +766,9 @@ class KnowledgeBase:
     def _article_conflicts(self) -> list[Conflict]:
         """D10 for article text: organisation-wide counts that newsroom articles state differently.
 
-        Each observation is (fact, value, the article's own publication date, url). Older articles were
-        right when published, so this is a dated disagreement, not an error: the newest article's value
-        is current. Two bounded patterns: branch-office counts, and "the Nth time <awarder> recognized
+        Each observation preserves value, publication date, snapshot and source. Different publication
+        dates are not proof that an article was erroneous. Two bounded patterns: branch-office counts,
+        and "the Nth time <awarder> recognized
         Dupaco" (kept apart per award program, taken from the article title)."""
         newest = {}                        # url -> passages of its newest snapshot
         for p in self.passages:
@@ -775,27 +781,27 @@ class KnowledgeBase:
         for url, ps in newest.items():
             for p in ps:
                 for m in BRANCH_COUNT.finditer(p.text):
-                    obs[("Number of Dupaco branch offices", "")][url] = (p.date, m.group(1))
+                    obs[("Number of Dupaco branch offices", "")][url] = (p.date, m.group(1), p.snap)
                 for m in TIMES_RECOGNIZED.finditer(p.text):
                     program = re.sub(r"\s+", " ", p.title.lower()).strip()
-                    obs[(f"Times {m.group(2)} has recognized Dupaco", program)][url] = (p.date, m.group(1).lower())
+                    obs[(f"Times {m.group(2)} has recognized Dupaco", program)][url] = (p.date, m.group(1).lower(), p.snap)
         out = []
         for (topic, program), seen in obs.items():
             dated = sorted(seen.items(), key=lambda kv: kv[1][0], reverse=True)   # newest article first
-            values = list(dict.fromkeys(v for _, (_, v) in dated))
+            values = list(dict.fromkeys(v for _, (_, v, _) in dated))
             if len(values) < 2:
                 continue
             first = {}
-            for url, (date, v) in dated:
-                first.setdefault(v, (date, url))
-            sid = self.snaps[self._snapshot_for(None)][0]
+            for url, (date, v, snap) in dated:
+                first.setdefault(v, (date, url, snap))
             out.append(Conflict(
                 topic=f"{topic}{' (' + program + ')' if program else ''} (newsroom articles disagree)",
                 values=values,
-                sources=[Source(url=first[v][1], snapshot_id=sid) for v in values],
-                resolution=values[0],
+                sources=[Source(url=first[v][1], snapshot_id=self.snaps[first[v][2]][0]) for v in values],
+                resolution=values[0] if first[values[0]][2] == self._snapshot_for(None) else None,
                 reason="dated observations: " + "; ".join(f"{v} in the article of {first[v][0]}" for v in values)
-                       + "; older articles were accurate when published, the newest article's value is current"))
+                       + f"; newest article found, {first[values[0]][0]}, says {values[0]}; "
+                       "publication dates do not establish exact change dates or historical accuracy"))
         return out
 
     def _fact_conflicts(self):
@@ -825,6 +831,7 @@ class KnowledgeBase:
             cur_page, cur = best(present[-1])
             cur_src = Source(url=cur_page[1], snapshot_id=self.snaps[present[-1]][0])
             resolution = _show(cur) if present[-1] == order[-1] else None
+            base.update(last_date=self.snaps[present[-1]][1], last_url=cur_page[1])
             # 1) history on the reference page
             changes = []
             for s in order:
@@ -833,7 +840,8 @@ class KnowledgeBase:
                     changes.append((s, v))
             if len(changes) > 1:
                 yield dict(base, kind="history", values=[_show(v) for _, v in changes], resolution=resolution,
-                           sources=[Source(url=ref[1], snapshot_id=self.snaps[s][0]) for s, _ in changes],
+                           sources=[Source(url=ref[1], snapshot_id=self.snaps[s][0]) for s, _ in changes] + [cur_src],
+                           observations=[(self.snaps[s][1], ref[1], _show(v)) for s, v in changes],
                            pages=[urlparse(ref[1]).path], dates=[self.snaps[s][1] for s, _ in changes[1:]])
             # 2) disagreement inside one snapshot
             dissent, refs = {}, set()      # (url, shown value) -> newest snapshot showing it
@@ -842,13 +850,15 @@ class KnowledgeBase:
                 for (rank, url), snaps in pages.items():
                     v = snaps.get(s)
                     if v is not None and url != ref_url and _differs(v, ref_v):
-                        dissent[(url, _show(v))] = s
+                        dissent[(url, _show(v))] = (s, ref_url, _show(ref_v))
                         refs.add(_show(ref_v))
             values = [_show(cur)] + sorted(({v for _, v in dissent} | refs) - {_show(cur)})
             if dissent and len(values) > 1:
                 yield dict(base, kind="disagreement", values=values, resolution=resolution,
                            sources=[cur_src] + [Source(url=u, snapshot_id=self.snaps[s][0])
-                                                for (u, _), s in sorted(dissent.items())],
+                               for (url, _), (s, ref_url, _) in sorted(dissent.items()) for u in (ref_url, url)],
+                           observations=[(self.snaps[s][1], ref_url, ref_v, url, v)
+                                         for (url, v), (s, ref_url, ref_v) in sorted(dissent.items())],
                            pages=[urlparse(cur_page[1]).path], stale=sorted({urlparse(u).path for u, _ in dissent}))
 
     def _facts(self, with_pid=False):

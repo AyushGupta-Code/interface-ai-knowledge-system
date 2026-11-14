@@ -127,3 +127,15 @@ Public / reworded / must-refuse / practice / conflict F1: 0.7736 / 0.73 / 17/18 
 Changed item scores: {"practice": {"t3": [0.0, 1.0]}}.
 
 Stale hits / errors: {"public": [0, 0], "reworded": [0, 0], "refusal": [0, 0], "practice": [0, 0]}. Newly answered refusals: {}.
+
+### Kept Q3 (`q3`)
+
+Observational Change and Disagreement remain separate. Both contemporaneous pages are cited; neither is blamed by rank. Article sources retain actual snapshot IDs. All23 synthetic cases pass; independent review passed. No item score changed. Refusal final0.9403 versus0.9444 is timing-only under simultaneous trace loads (same17/18 correctness); see speed report. This is not a new answered refusal.
+
+Command: `python3 dev/run_build_checks.py q3 --previous q2_complete` (all five checks listed above).
+
+Public / reworded / must-refuse / practice / conflict F1: 0.7736 / 0.73 / 17/18 / 1.0 / 0.7586; resolution 1.0; conflict negatives 0/8.
+
+Changed item scores: {}.
+
+Stale hits / errors: {"public": [0, 0], "reworded": [0, 0], "refusal": [0, 0], "practice": [0, 0]}. Newly answered refusals: {}.

@@ -47,6 +47,11 @@ def page_kind(url: str) -> str:
         return "promo"
     if path.startswith(PRODUCT_PREFIXES):
         return "product"
+    segments = set(path.strip("/").split("/"))
+    for words, kind in (({"rates"}, "rates"), ({"promo", "promotions"}, "promo"),
+                        ({"calculator", "calculators"}, "calculator")):
+        if segments & words:
+            return kind
     return "other"
 
 
@@ -69,6 +74,7 @@ def article_date(lines: list[str]) -> str:
 WORD_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "ten": 10,
                 "fifteen": 15, "twenty": 20, "thirty": 30}
 SYNONYMS = [
+    (r"\bshare certificates?\b", "certificate"),
     (r"\b(home|house) ?loans?\b", "mortgage"),
     (r"\bcertificates? of deposit\b|\bcds?\b", "certificate"),
     (r"\b(car|vehicle)s?\b", "auto"),
@@ -235,12 +241,24 @@ DATE_SPAN = re.compile(
     r"|\b(?:19|20)\d\d-\d{1,2}(?:-\d{1,2})?\b|\b(?:as of|in|during) (?:19|20)\d\d\b(?!-)", re.I)
 
 
+class TermMonths(float):
+    """A term qualifier in months, distinct from balances and model years."""
+
+
 def question_numbers(question: str) -> list[float]:
     """Numbers that qualify the question (terms, amounts, model years); percentages and dates are not qualifiers."""
     out = []
-    for m in re.finditer(r"\$?(\d[\d,]*(?:\.\d+)?)(\s*%)?", DATE_SPAN.sub(" ", question)):
+    question = DATE_SPAN.sub(" ", question)
+    # Convert spelled-out terms, not conversational numbers such as "which one".
+    question = re.sub(r"\b(" + "|".join(WORD_NUMBERS) + r")\b(?=[ -]+(?:months?|years?|mo|yr)\b)",
+                      lambda m: str(WORD_NUMBERS[m.group(1).lower()]), question, flags=re.I)
+    for m in re.finditer(r"\$?(\d[\d,]*(?:\.\d+)?)(\s*%)?", question):
         if not m.group(2):
-            out.append(_num(m.group(1)))
+            n = _num(m.group(1))
+            unit = re.match(r"[- ]+(months?|years?|mo|yr)\b", question[m.end():], re.I)
+            if unit and not m.group(0).startswith("$"):
+                n = TermMonths(n * (12 if unit.group(1).lower().startswith(("year", "yr")) else 1))
+            out.append(n)
     return out
 
 
@@ -268,6 +286,12 @@ def numbers_ok(qnums: list[float], text: str) -> bool:
         return True
     nums, years, money = number_spans(text)
     for n in qnums:
+        if isinstance(n, TermMonths):
+            terms = {float(v) * (12 if unit.lower().startswith(("year", "yr")) else 1)
+                     for v, unit in re.findall(r"\b(\d+(?:\.\d+)?)[- ]+(months?|years?|mo|yr)\b", text, re.I)}
+            if n not in terms:
+                return False
+            continue
         if n in nums:
             continue
         spans = years if 1900 <= n <= 2100 else money if n >= 100 else []
@@ -297,6 +321,21 @@ HEADING = re.compile(r"^#{1,6}\s+(.*)$")
 BOLD_LABEL = re.compile(r"^\*\*[^*]{1,40}\*\*")                  # "**Lobby** Monday-Thursday: ..."
 STATUS = re.compile(r"^(open|closed|open now|closed now)$", re.I)  # live badge, true only at crawl time
 LONG = 90                                                          # a line this long is prose, not a list item
+
+
+def labeled_rate(line: str) -> tuple:
+    """Adapt a complete product/measure:percentage line to the table fact interface.
+
+    Ordinary prose, unlabeled percentages and multi-value sentences are not facts.
+    Source page classification still controls whether a fact can answer a rate question.
+    """
+    match = re.fullmatch(
+        r"(.+?)\s+(annual percentage yield|annual percentage rate|dividend rate|interest rate|APY|APR|rate)"
+        r"\s*:\s*(\d+(?:\.\d+)?\s*%)\s*", line, re.I)
+    if not match or not _family_of(match.group(1)):
+        return ()
+    name, measure, value = match.groups()
+    return (("Product", name.strip()), (measure, value))
 
 
 def split_page(md: str):
@@ -344,6 +383,13 @@ def split_page(md: str):
         if m:
             flush()
             heading, labels = m.group(1).strip("*# "), []
+            continue
+        cells = labeled_rate(s)
+        if cells:
+            flush()
+            table_id += 1
+            out.append((s, table_id, heading, cells))
+            labels = []
             continue
         if len(s) >= LONG:
             flush()

@@ -139,3 +139,15 @@ Public / reworded / must-refuse / practice / conflict F1: 0.7736 / 0.73 / 17/18 
 Changed item scores: {}.
 
 Stale hits / errors: {"public": [0, 0], "reworded": [0, 0], "refusal": [0, 0], "practice": [0, 0]}. Newly answered refusals: {}.
+
+### Kept Q4a (`q4a`)
+
+Title matches now admit passages for inspection, with all existing checks and half-weight title evidence retained. No item scores changed on any set; this mechanism alone does not solve page filtering or intent matching. Independent review passed. Refusal17/18 unchanged; slight final variation is first-query timing under concurrent checks.
+
+Command: `python3 dev/run_build_checks.py q4a --previous q3` (all five checks listed above).
+
+Public / reworded / must-refuse / practice / conflict F1: 0.7736 / 0.73 / 17/18 / 1.0 / 0.7586; resolution 1.0; conflict negatives 0/8.
+
+Changed item scores: {}.
+
+Stale hits / errors: {"public": [0, 0], "reworded": [0, 0], "refusal": [0, 0], "practice": [0, 0]}. Newly answered refusals: {}.

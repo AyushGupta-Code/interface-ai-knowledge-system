@@ -593,21 +593,23 @@ class KnowledgeBase:
 
         def search(pages):
             score = {}
-            for t in qtoks:
-                for pid in index.get(t, ()):
-                    p = self.passages[pid]
-                    if pid in score or p.page not in pages:
-                        continue
-                    if not (shape in p.shapes and numbers_ok(qnums, p.text)):
-                        continue
-                    title_toks = self.pages[p.page][0]
-                    if anchor and anchor not in p.toks and anchor not in title_toks:
-                        continue
-                    if fam_rows is not None and (pid not in fam_rows or not required <= p.toks | title_toks):
-                        continue
-                    own = sum(idf[x] for x in qtoks & p.toks)
-                    from_title = sum(idf[x] for x in (qtoks & title_toks) - p.toks)
-                    score[pid] = (own + 0.5 * from_title) / total
+            candidates = {pid for t in qtoks for pid in index.get(t, ())}
+            title_pages = {pg for pg in pages if qtoks & self.pages[pg][0]}
+            candidates.update(pid for pid, p in enumerate(self.passages) if p.page in title_pages)
+            for pid in sorted(candidates):
+                p = self.passages[pid]
+                if pid in score or p.page not in pages:
+                    continue
+                if not (shape in p.shapes and numbers_ok(qnums, p.text)):
+                    continue
+                title_toks = self.pages[p.page][0]
+                if anchor and anchor not in p.toks and anchor not in title_toks:
+                    continue
+                if fam_rows is not None and (pid not in fam_rows or not required <= p.toks | title_toks):
+                    continue
+                own = sum(idf[x] for x in qtoks & p.toks)
+                from_title = sum(idf[x] for x in (qtoks & title_toks) - p.toks)
+                score[pid] = (own + 0.5 * from_title) / total
             best = max(score.values(), default=0.0)
             cutoff = max(0.35, best - 0.15)
             return score, cutoff, [pid for pid, sc in score.items() if sc >= cutoff]

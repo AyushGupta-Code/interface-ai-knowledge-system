@@ -270,6 +270,23 @@ def sixth_snapshot_checks(submission: Path, source: Path) -> list[tuple[str, boo
         question = "What is the 12-month certificate APY?"
         answer = system.answer(question)
         past = system.answer(question, previous_date)
+        cases = [
+            {"id": "sixth-current", "question": question, "must_include": ["4.44%"],
+             "must_not_include": ["3.40%"], "category": "stale_trap", "weight": 1.0,
+             "expected_sources": [target["url"]]},
+            {"id": "sixth-as-of", "question": question, "as_of": previous_date,
+             "must_include": ["3.40%"], "must_not_include": ["4.44%"],
+             "category": "temporal_as_of", "weight": 1.0, "expected_sources": []},
+        ]
+        eval_path = Path(temp) / "sixth_eval.jsonl"
+        eval_path.write_text("\n".join(json.dumps(case) for case in cases) + "\n")
+        output_path = Path(temp) / "harness_results"
+        subprocess.run([sys.executable, str(ROOT / "harness/run_eval.py"),
+                        "--submission", str(submission.resolve()), "--snapshots", str(copied),
+                        "--eval", str(eval_path), "--out", str(output_path)],
+                       env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"),
+                       capture_output=True, text=True, check=True, timeout=300)
+        report = json.loads((output_path / "report.json").read_text())
         return [
             ("sixth snapshot is full", len(snapshots) == len(dirs) + 1 and len(snapshots[-1].pages) == len(snapshots[-2].pages),
              "all prior snapshots copied; October has all latest pages"),
@@ -279,6 +296,10 @@ def sixth_snapshot_checks(submission: Path, source: Path) -> list[tuple[str, boo
              "September APY is unchanged"),
             ("sixth snapshot conflict resolution", any("4.44%" in (c.resolution or "") for c in system.conflicts()),
              "synthetic new value is the conflict resolution"),
+            ("sixth snapshot passes actual harness CLI", report["final_score"] == 1.0
+             and report["errors"] == 0 and report["stale_trap_hits"] == 0,
+             f"run_eval.py --snapshots <full-copy>: score {report['final_score']}, "
+             f"errors {report['errors']}, stale traps {report['stale_trap_hits']}"),
         ]
 
 

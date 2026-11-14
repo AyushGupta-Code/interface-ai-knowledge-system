@@ -199,3 +199,15 @@ Public / reworded / must-refuse / practice / conflict F1: 0.8512 / 0.7943 / 17/1
 Changed item scores: {"public": {"dup-073": [0.0, 1.0], "dup-087": [0.0, 1.0]}, "reworded": {"dup-073-p2": [0.0, 1.0], "dup-087-p1": [0.0, 1.0], "dup-087-p2": [0.0, 1.0]}}.
 
 Stale hits / errors: {"public": [0, 0], "reworded": [0, 0], "refusal": [0, 0], "practice": [0, 0]}. Newly answered refusals: {}.
+
+### Kept determinism fix (`deterministic`)
+
+Explicit lexical anchor ties, sorted lexical score accumulation, and date/URL article ties preserve all per-item scores. Independent review passed. `python3 dev/check_finishing_gates.py --determinism` passes37/37: all public/reworded/refusal answers, sources and conflict reports have identical SHA256864cf1291f011cfb35148b1b2c3ff808a92157c1a11d4cb43e196787db1fde81 across PYTHONHASHSEED0,1,42. Refusal17/18 unchanged; timing-only final variation is recorded in reports.
+
+Command: `python3 dev/run_build_checks.py deterministic --previous q4c` (all five checks listed above).
+
+Public / reworded / must-refuse / practice / conflict F1: 0.8512 / 0.7943 / 17/18 / 1.0 / 0.7586; resolution 1.0; conflict negatives 0/8.
+
+Changed item scores: {}.
+
+Stale hits / errors: {"public": [0, 0], "reworded": [0, 0], "refusal": [0, 0], "practice": [0, 0]}. Newly answered refusals: {}.

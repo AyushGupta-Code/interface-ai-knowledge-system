@@ -554,10 +554,10 @@ class KnowledgeBase:
         # the right shape (times for an hours question, a % on a rate page for a rate question...).
         pindex = self.page_index[si]
         n_pages = max(1, len({pg for ids in pindex.values() for pg in ids}))
-        pidf = {t: math.log(1 + n_pages / (1 + len(pindex.get(t, ())))) for t in qtoks}
+        pidf = {t: math.log(1 + n_pages / (1 + len(pindex.get(t, ())))) for t in sorted(qtoks)}
         ptotal = sum(pidf.values()) or 1.0
         pcov = defaultdict(float)
-        for t in qtoks:
+        for t in sorted(qtoks):
             for pg in pindex.get(t, ()):
                 if shape in self.pages[pg][2]:
                     pcov[pg] += pidf[t] / ptotal
@@ -568,12 +568,12 @@ class KnowledgeBase:
 
         # Stage B: passages on those pages. Their own words count fully, the page title at half (Q4).
         index, n = self.index[si], max(1, self.n_passages[si])
-        idf = {t: math.log(1 + n / (1 + len(index.get(t, ())))) for t in qtoks}
+        idf = {t: math.log(1 + n / (1 + len(index.get(t, ())))) for t in sorted(qtoks)}
         total = sum(idf.values()) or 1.0
         # D9: the question's most specific word (rarest non-generic word the site uses at all, e.g.
         # "construction", "Mullan") must be in the passage or its page title. Otherwise it's a near miss.
         specific = [t for t in qtoks if t not in GENERIC and t not in WORDING and index.get(t)]
-        anchor = max(specific, key=lambda w: idf[w]) if specific else None
+        anchor = min(specific, key=lambda w: (-idf[w], w)) if specific else None
         tr.update(anchor=anchor, idf=idf)
 
         # D9 for rates, by product family (replaces the one-word veto when the question names a family):
@@ -618,8 +618,8 @@ class KnowledgeBase:
                     continue
                 if fam_rows is not None and (pid not in fam_rows or not required <= p.toks | title_toks):
                     continue
-                own = sum(idf[x] for x in qtoks & p.toks)
-                from_title = sum(idf[x] for x in (qtoks & title_toks) - p.toks)
+                own = sum(idf[x] for x in sorted(qtoks & p.toks))
+                from_title = sum(idf[x] for x in sorted((qtoks & title_toks) - p.toks))
                 score[pid] = (own + 0.5 * from_title) / total
             best = max(score.values(), default=0.0)
             cutoff = max(0.35, best - 0.15)
@@ -641,7 +641,7 @@ class KnowledgeBase:
             # like 'branch' or 'rate' don't count); then, among
             # articles, the newest; then the passage's own score.
             p = self.passages[pid]
-            about = round(sum(idf[w] for w in (qtoks - GENERIC) & self.pages[p.page][0]) / total, 2)
+            about = round(sum(idf[w] for w in sorted((qtoks - GENERIC) & self.pages[p.page][0])) / total, 2)
             newest_first = (_neg(p.date) if p.date else "~") if p.kind == "article" else ""
             return (KIND_RANK[p.kind], -about, newest_first, -round(score[pid], 2), p.url, pid)
 
@@ -923,7 +923,7 @@ class KnowledgeBase:
         obs = self._article_observations()
         out = []
         for (topic, program), seen in obs.items():
-            dated = sorted(seen.items(), key=lambda kv: kv[1][0], reverse=True)   # newest article first
+            dated = sorted(seen.items(), key=lambda kv: (kv[1][0], kv[0]), reverse=True)   # newest article first
             values = list(dict.fromkeys(v for _, (_, v, _, _) in dated))
             if len(values) < 2:
                 continue

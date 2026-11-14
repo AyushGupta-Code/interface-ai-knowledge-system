@@ -148,7 +148,7 @@ def answer_shape(question: str) -> str:
         return "address"
     if re.search(r"\bhow many\b|\bnumber of\b", q):
         return "count"
-    rate_words = re.search(r"\b(rates?|apr|apy|dividends?|interest|yield)\b", q)
+    rate_words = re.search(r"\b(rates?|aprs?|apys?|dividends?|interest|yield)\b", q)
     if re.search(r"\bfees?\b", q) or (re.search(r"\b(charges?|costs?)\b", q) and not rate_words):
         return "fee"       # "what APR do you charge" asks for a rate, not a fee
     if rate_words:
@@ -530,8 +530,29 @@ class KnowledgeBase:
             row_ids = [pid for pid in sorted(cands)
                        if self.passages[pid].page == win.page and self.passages[pid].table == win.table
                        and score[pid] >= score[win_id] - 1e-9][:12]
+            if fam_rows:
+                # A category question ("your credit cards") spans several tables and pages (personal and
+                # business cards): add the family's other rows that are as strong as the winner, from rate
+                # and product pages, once per fact.
+                by_pid, by_fact = self._fact_index_get()
+                seen = {(by_pid.get(pid), tuple(sorted(by_fact[by_pid[pid]][self.passages[pid].url].items())))
+                        for pid in row_ids if pid in by_pid}
+                more = sorted((pid for pid in score if pid in fam_rows and pid not in row_ids
+                               and self.passages[pid].kind in ("rates", "product")
+                               and score[pid] >= score[win_id] - 1e-9),
+                              key=lambda pid: (KIND_RANK[self.passages[pid].kind], self.passages[pid].url, pid))
+                for pid in more:
+                    if pid not in by_pid:
+                        continue
+                    fact = (by_pid[pid], tuple(sorted(by_fact[by_pid[pid]][self.passages[pid].url].items())))
+                    if fact not in seen and len(row_ids) < 12:
+                        seen.add(fact)
+                        row_ids.append(pid)
             body = "\n".join(f"- {self.passages[pid].text}" for pid in row_ids)
             sources += [Source(url=u, snapshot_id=sid) for u in self._same_fact_pages(row_ids, win.url)]
+            for u in dict.fromkeys(self.passages[pid].url for pid in row_ids):
+                if u not in {src.url for src in sources}:
+                    sources.append(Source(url=u, snapshot_id=sid))
         else:
             # Evidence bundle: the page's other passages that pass every check and score close to the
             # winner, in page order, so an answer split over adjacent paragraphs (a program and its
@@ -545,6 +566,16 @@ class KnowledgeBase:
         when = f"as of {taken_on}" if as_of else "currently"
         text = f"{win.title or 'Dupaco'} ({when}):\n{body}\nSource: {win.url}"
         return Answer(text=text, sources=sources)
+
+    def _fact_index_get(self):
+        """pid -> (snap, fact key), and (snap, fact key) -> url -> measure -> value; built once."""
+        if self._fact_index is None:
+            by_pid, by_fact = {}, defaultdict(lambda: defaultdict(dict))
+            for key, m, snap, kind, url, v, _, pid in self._facts(with_pid=True):
+                by_pid[pid] = (snap, key)
+                by_fact[(snap, key)][url][m] = v
+            self._fact_index = (by_pid, by_fact)
+        return self._fact_index
 
     def _family_index(self):
         """Per snapshot: product family -> its rate-row passage ids, and family -> words its rows use."""
@@ -560,13 +591,7 @@ class KnowledgeBase:
     def _same_fact_pages(self, row_ids, cited: str, limit: int = 5) -> list[str]:
         """Other rate and product pages in the same snapshot that state every quoted row as the same
         fact (same product, tier/term and values, by the conflict identity of D10)."""
-        if self._fact_index is None:
-            by_pid, by_fact = {}, defaultdict(lambda: defaultdict(dict))
-            for key, m, snap, kind, url, v, _, pid in self._facts(with_pid=True):
-                by_pid[pid] = (snap, key)
-                by_fact[(snap, key)][url][m] = v
-            self._fact_index = (by_pid, by_fact)
-        by_pid, by_fact = self._fact_index
+        by_pid, by_fact = self._fact_index_get()
         common = None
         for pid in row_ids:
             if pid not in by_pid:

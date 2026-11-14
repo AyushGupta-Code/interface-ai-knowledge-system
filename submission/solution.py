@@ -72,7 +72,7 @@ SYNONYMS = [
     (r"\b(home|house) ?loans?\b", "mortgage"),
     (r"\bcertificates? of deposit\b|\bcds?\b", "certificate"),
     (r"\b(car|vehicle)s?\b", "auto"),
-    (r"\bdrive[- ]?(?:through|thru|up)\b", "driveup"),
+    (r"\bdrive[- ]?(?:through|thru|up)(?: windows?)?\b", "driveup"),
     (r"\bcredit cards?\b", "visa"),
     (r"\baba\b", "routing"),
     (r"\barms?\b|\badjustable[- ]rate\b", "adjustable"),
@@ -81,6 +81,9 @@ SYNONYMS = [
     (r"\byield\b", "apy"),
     (r"\b(college|university)\b", "student"),
     (r"\bvto\b", "volunteer time off"),
+    (r"\bshut(?:ting)?(?: down)?\b", "close"),
+    (r"\bholding\b", "balance"),
+    (r"\b(?:mid|early|late)[- ]?(?=(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b)", ""),
 ]
 STOP = set("""a an the is are was were be been do does did can could would should will may might of to in on at for
 from by with and or not no any all some this that these those there here what which who whom whose when where why how
@@ -131,6 +134,8 @@ RATE_KINDS = ("rates", "product", "promo", "other")   # calculators, articles an
 
 def answer_shape(question: str) -> str:
     q = question.lower()
+    if re.search(r"\bhow (?:do|can|should) (?:i|we) (?:change|update|edit|correct)\b", q):
+        return "any"   # "How do I change my address?" asks for a procedure, not an address
     if re.search(r"\b(link|url|website|web ?page)\b|which page|where (?:on|can i (?:find|see)|do i (?:find|see))", q):
         return "link"
     if re.search(r"\bwhat date\b|\bstill open\b|\bclosing\b|\bshut down\b|\bwhen (?:does|will|did)\b.*\bclose", q):
@@ -169,6 +174,12 @@ def passage_shapes(kind: str, text: str) -> frozenset:
 # Category words never decide whether a passage is about the question's specific subject (D9).
 GENERIC = set("""rate interest apr apy dividend yield fee charge cost hour open time address located where branch
 location loan account saving member number link url website page dupaco credit union bank month year""".split())
+# Wording words: they say how the member phrased the question, not what it is about, so they can never
+# be the specific word (dev/REFUSAL_TRACE.md: between, highest, list... were chosen and caused refusals).
+WORDING = set("between highest lowest top best list".split())
+# Words naming the kind of answer wanted (a link, a page). They are read by answer_shape(), and are not
+# topic words: counting them diluted page coverage ("link to the location finder").
+ANSWER_KIND = set("link url website web page list site".split())
 
 
 # ---------------------------------------------------------------------------------------------
@@ -389,10 +400,12 @@ class KnowledgeBase:
         tr["snap"] = si
         if si is None:
             return Answer(text=REFUSAL, confident=False)
-        qtoks = tokens(question)
+        qtoks = tokens(question) - ANSWER_KIND
         qnums = question_numbers(question)
         shape = answer_shape(question)
         tr.update(qtoks=qtoks, qnums=qnums, shape=shape)
+        if not qtoks:
+            return Answer(text=REFUSAL, confident=False)
 
         # Stage A: which pages are about the question (title + all their text) and hold an answer of
         # the right shape (times for an hours question, a % on a rate page for a rate question...).
@@ -409,8 +422,6 @@ class KnowledgeBase:
         tr.update(pcov=dict(pcov), best_page=best_page)
         if best_page < 0.5:
             return Answer(text=REFUSAL, confident=False)
-        pages = {pg for pg, c in pcov.items() if c >= 0.75 * best_page}
-        tr["pages"] = pages
 
         # Stage B: passages on those pages. Their own words count fully, the page title at half (Q4).
         index, n = self.index[si], max(1, self.n_passages[si])
@@ -418,26 +429,37 @@ class KnowledgeBase:
         total = sum(idf.values()) or 1.0
         # D9: the question's most specific word (rarest non-generic word the site uses at all, e.g.
         # "construction", "Mullan") must be in the passage or its page title. Otherwise it's a near miss.
-        specific = [t for t in qtoks if t not in GENERIC and index.get(t)]
+        specific = [t for t in qtoks if t not in GENERIC and t not in WORDING and index.get(t)]
         anchor = max(specific, key=lambda w: idf[w]) if specific else None
         tr.update(anchor=anchor, idf=idf)
-        score = {}
-        for t in qtoks:
-            for pid in index.get(t, ()):
-                p = self.passages[pid]
-                if pid in score or p.page not in pages:
-                    continue
-                if not (shape in p.shapes and numbers_ok(qnums, p.text)):
-                    continue
-                title_toks = self.pages[p.page][0]
-                if anchor and anchor not in p.toks and anchor not in title_toks:
-                    continue
-                own = sum(idf[x] for x in qtoks & p.toks)
-                from_title = sum(idf[x] for x in (qtoks & title_toks) - p.toks)
-                score[pid] = (own + 0.5 * from_title) / total
-        best = max(score.values(), default=0.0)
-        cands = [pid for pid, s in score.items() if s >= max(0.35, best - 0.15)]
-        tr.update(score=score, cutoff=max(0.35, best - 0.15), cands=cands)
+
+        def search(pages):
+            score = {}
+            for t in qtoks:
+                for pid in index.get(t, ()):
+                    p = self.passages[pid]
+                    if pid in score or p.page not in pages:
+                        continue
+                    if not (shape in p.shapes and numbers_ok(qnums, p.text)):
+                        continue
+                    title_toks = self.pages[p.page][0]
+                    if anchor and anchor not in p.toks and anchor not in title_toks:
+                        continue
+                    own = sum(idf[x] for x in qtoks & p.toks)
+                    from_title = sum(idf[x] for x in (qtoks & title_toks) - p.toks)
+                    score[pid] = (own + 0.5 * from_title) / total
+            best = max(score.values(), default=0.0)
+            cutoff = max(0.35, best - 0.15)
+            return score, cutoff, [pid for pid, sc in score.items() if sc >= cutoff]
+
+        # The best-covered pages first; if none of them holds a passing passage, every page that still
+        # covers half the question (a refusal only when nothing on the site passes the checks).
+        pages = {pg for pg, c in pcov.items() if c >= 0.75 * best_page}
+        score, cutoff, cands = search(pages)
+        if not cands:
+            pages = {pg for pg, c in pcov.items() if c >= 0.5}
+            score, cutoff, cands = search(pages)
+        tr.update(pages=pages, score=score, cutoff=cutoff, cands=cands)
         if not cands:
             return Answer(text=REFUSAL, confident=False)
 

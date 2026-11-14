@@ -28,6 +28,6 @@ None. The system uses no language model and makes no network calls.
 
 **D8. Measures.** Answer the **Measure** asked for. For a plain "rate", give the rate with its APR or APY, labelled. Two Measures of the same product are different facts, never a Conflict.
 
-**D9. A close match is not an answer.** If the product, Tier or Measure asked about has no matching passage, give a Refusal ("I don't know, please contact Dupaco") with no numbers. Never substitute a nearby product, e.g. the 30-year fixed rate for a 7/1 ARM question.
+**D9. A close match is not an answer.** If the product, Tier or Measure asked about has no matching passage, give a Refusal ("I don't know, please contact Dupaco") with no numbers. Never substitute a nearby product, e.g. the 30-year fixed rate for a 7/1 ARM question. In code: the question's most specific word must appear in the passage or its page title. Wording words (between, highest, lowest, top, best, list) can never be that word, because the refusal trace (dev/REFUSAL_TRACE.md) showed them causing half the wrong refusals; a refusal happens only when no page covering half the question has a passing passage.
 
 **D10. Conflicts.** A Conflict is two different values for the same product, Tier and Measure, within a snapshot or across snapshots (the contract says "across or within"). Each one is resolved to the **Current value**, with the reason (newer snapshot, or authoritative page over article or calculator).

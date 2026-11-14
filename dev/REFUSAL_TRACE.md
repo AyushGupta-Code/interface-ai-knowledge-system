@@ -46,3 +46,14 @@ best evidence reached:
 4. **No case stopped at ranking (stage 4).** Evidence that survived the checks always won.
 
 None of the 12 needs a broad threshold change. The fixes are targeted at the stage that dropped the evidence.
+
+## After the fixes (step 3)
+
+Applied: wording words can't be the specific word; synonyms (shut down → close, holding → balance,
+drive-up window → drive-up); "mid-May" style date prefixes dropped; answer-kind words (link, page, list) removed
+from topic words; page fallback to every page covering half the question before refusing; "how do I change…"
+read as a procedure question.
+
+Re-trace: 12 → 2 wrong refusals. Left: dup-080-p2 ("location finder": the site says "Find a branch", and adding
+that synonym would be fitting one question) and dup-104-p2 (a yes/no comparison across branches, which needs
+a different answer type). Public 0.7282, reworded 0.5619, should_refuse still 3/3 on public.

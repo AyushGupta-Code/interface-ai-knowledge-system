@@ -191,6 +191,20 @@ location loan account saving member number link url website page dupaco credit u
 BUNDLE_MARGIN = 0.15   # same margin as the candidate cutoff: passages this close are equally good evidence
 
 
+_NAME = r"(?!Pay\b|Wallet\b)[A-Z][a-z]+"
+PROVIDERS = re.compile(rf"\b((?:{_NAME}, )*{_NAME}),? (or|and) ({_NAME}) (Pay|Wallet)\b")
+
+
+def expand_providers(text: str) -> str:
+    """"Apple, Google or Samsung Pay" -> "Apple Pay, Google Pay or Samsung Pay" in the answer text
+    (source quotes keep the site's wording). Only coordinated capitalised names before Pay/Wallet."""
+    def fix(m):
+        names = m.group(1).split(", ") + [m.group(3)]
+        full = [f"{n} {m.group(4)}" for n in names]
+        return ", ".join(full[:-1]) + f" {m.group(2)} " + full[-1]
+    return PROVIDERS.sub(fix, text)
+
+
 # Wording words: they say how the member phrased the question, not what it is about, so they can never
 # be the specific word (dev/REFUSAL_TRACE.md: between, highest, list... were chosen and caused refusals).
 WORDING = set("between highest lowest top best list".split())
@@ -563,6 +577,7 @@ class KnowledgeBase:
             parts = [self.passages[pid].text for pid in sorted(near)]
             body = " ... ".join(parts)
             body = body if len(body) <= 900 else body[:900].rsplit(" ", 1)[0] + " ..."
+        body = expand_providers(body)
         when = f"as of {taken_on}" if as_of else "currently"
         text = f"{win.title or 'Dupaco'} ({when}):\n{body}\nSource: {win.url}"
         return Answer(text=text, sources=sources)

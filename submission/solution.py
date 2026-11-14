@@ -463,6 +463,10 @@ class KnowledgeBase:
         self.index.append(dict(index))
         self.page_index.append(dict(page_index))
         self.n_passages.append(len(self.passages) - start)
+        # Build the per-snapshot and cross-snapshot lookups now, so no question pays for them (p95 < 2 s).
+        self._link_index(si)
+        self._family_index()
+        self._fact_index_get()
 
     # -----------------------------------------------------------------------------------------
     def _snapshot_for(self, as_of):
@@ -490,16 +494,15 @@ class KnowledgeBase:
         if tr.get("best_page", 0) >= 0.5:
             return ans
         subject = tokens(question) - GENERIC - WORDING - ANSWER_KIND
-        current_pages = {p.page for p in self.passages if p.snap == selected}
+        current_pages = {p.page for p in self._snap_passages(selected)}
         if subject and any(subject <= self.pages[pg][1] for pg in current_pages):
             # A withdrawal or unavailable-product notice need not have the requested shape.
             return ans
         qfam = _family_of(canonical(question)) if answer_shape(question) == "rate" else ""
-        if qfam and any(p.snap == selected and _family_of(p.text) == qfam
-                        and re.search(r"withdrawn|discontinued|no longer (?:available|offered|published)", p.text, re.I)
-                        for p in self.passages):
-            return ans
         if qfam and any(f == qfam or CATEGORY.get(f) == qfam for f in self._family_index()[selected][0]):
+            return ans
+        if qfam and any(re.search(r"withdrawn|discontinued|no longer (?:available|offered|published)", p.text, re.I)
+                        and _family_of(p.text) == qfam for p in self._snap_passages(selected)):
             return ans
         limit = self.snaps[selected][1]
         for old in sorted((i for i, (_, d) in enumerate(self.snaps) if d < limit),
@@ -511,12 +514,12 @@ class KnowledgeBase:
             win = self.passages[past_trace["winner"]]
             # Never resurrect an earlier version when any later version of its page exists,
             # including withdrawal notices or a different published tier/measure.
-            if any(p.url == win.url and self.snaps[old][1] < self.snaps[p.snap][1] <= limit
-                   for p in self.passages):
+            if any(self.snaps[old][1] < self.snaps[s2][1] <= limit and win.url in self._snap_urls(s2)
+                   for s2 in range(len(self.snaps))):
                 continue
             if win.kind not in ("rates", "product", "other"):
                 continue
-            page_text = " ".join(p.text for p in self.passages if p.page == win.page)
+            page_text = " ".join(p.text for p in self._snap_passages(old) if p.page == win.page)
             if re.search(r"\b(expired|withdrawn|discontinued|superseded)\b|no longer (?:available|offered|published)"
                          r"|\bexpires?\b|\bvalid (?:until|through)\b|\bavailable until\b"
                          r"|offer (?:ended|ends)|promotion (?:ended|ends)", page_text, re.I):
@@ -528,6 +531,17 @@ class KnowledgeBase:
                           f"Last observed on {observed}:\n{body}\n"
                           f"I can't confirm the current value.\nSource: {win.url}", sources=past.sources)
         return ans
+
+    def _snap_passages(self, si):
+        """The passages of snapshot si (passages are stored snapshot by snapshot, in ingest order)."""
+        start = sum(self.n_passages[:si])
+        return self.passages[start:start + self.n_passages[si]]
+
+    def _snap_urls(self, si) -> set:
+        cache = self.__dict__.setdefault("_url_sets", {})
+        if si not in cache:
+            cache[si] = {p.url for p in self._snap_passages(si)}
+        return cache[si]
 
     def _answer_snapshot(self, question: str, si, _trace=None) -> Answer:
         """_trace: optional dict filled with every stage's intermediate results (dev/trace_refusals.py)."""
@@ -693,16 +707,35 @@ class KnowledgeBase:
         text = f"{win.title or 'Dupaco'} ({when}):\n{body}\nSource: {win.url}"
         return Answer(text=text, sources=sources)
 
+    def _link_index(self, si: int):
+        """Per snapshot, built once: url -> passage ids, and every http(s) link on rate, product and
+        other pages as (pid, label, destination, target without fragment, context, context words)."""
+        cache = self.__dict__.setdefault("_link_cache", {})
+        if si not in cache:
+            start = sum(self.n_passages[:si])
+            by_url, rows = defaultdict(list), []
+            for pid, p in enumerate(self._snap_passages(si), start):
+                by_url[urlparse(p.url)._replace(fragment="").geturl().rstrip("/")].append(pid)
+            for pid, p in enumerate(self._snap_passages(si), start):
+                if p.kind not in ("rates", "product", "other"):
+                    continue
+                for label, href in re.findall(r"\[([^\[\]]+)\]\(([^\s)]+)\)", p.text):
+                    destination = urljoin(p.url, href)
+                    if urlparse(destination).scheme not in ("http", "https"):
+                        continue
+                    context = label + " " + p.context
+                    target = urlparse(destination)._replace(fragment="").geturl().rstrip("/")
+                    rows.append((pid, label, destination, target, context, frozenset(tokens(context))))
+            cache[si] = (by_url, rows)
+        return cache[si]
+
     def _labeled_link(self, question: str, si: int, trace: dict):
         """Return actual destinations supported by link labels/sections and target evidence."""
         family = _family_of(canonical(question))
         subject = tokens(question) - GENERIC - WORDING - ANSWER_KIND - {"use", "find", "see"}
         if not subject:
             return None
-        by_url = defaultdict(list)
-        for pid, p in enumerate(self.passages):
-            if p.snap == si:
-                by_url[urlparse(p.url)._replace(fragment="").geturl().rstrip("/")].append(pid)
+        by_url, link_rows = self._link_index(si)
         family_rows = set()
         required = set()
         if family:
@@ -728,20 +761,13 @@ class KnowledgeBase:
                 return Answer(text=REFUSAL, confident=False)
             required = content & own
         links = []
-        for pid, p in enumerate(self.passages):
-            if p.snap != si or p.kind not in ("rates", "product", "other"):
-                continue
-            for label, href in re.findall(r"\[([^\[\]]+)\]\(([^\s)]+)\)", p.text):
-                destination = urljoin(p.url, href)
-                if urlparse(destination).scheme not in ("http", "https"):
-                    continue
-                context = label + " " + p.context
+        for pid, label, destination, target, context, context_toks in link_rows:
+                p = self.passages[pid]
                 if family:
                     if _family_of(context) != family:
                         continue
-                elif not subject <= tokens(context):
+                elif not subject <= context_toks:
                     continue
-                target = urlparse(destination)._replace(fragment="").geturl().rstrip("/")
                 targets = by_url.get(target, [])
                 if family:
                     targets = [i for i in targets if i in family_rows

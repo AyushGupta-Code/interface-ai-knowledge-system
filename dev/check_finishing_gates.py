@@ -163,6 +163,32 @@ def synthetic_checks(submission: Path) -> list[tuple[str, bool, str]]:
     checks.append(("multi-value labeled rate is rejected",
                    not helpers["labeled_rate"]("6-month certificate APY: 3.50% / 3.10%"),
                    "ambiguous multi-value prose must not become one structured fact"))
+    rates_link = page("/rates", "Deposit Rates", "# Certificates\n\n[Certificate rates](/personal/certificates)")
+    linked_certificate = page("/personal/certificates", "Certificates", "# Certificates\n\n36-month certificate APY: 3.50%")
+    link_system = build(submission, [snapshot(latest, [rates_link, linked_certificate])])
+    answer = link_system.answer("Where can I find the 36-month certificate rates?")
+    checks.append(("labelled link reaches matching certificate evidence", linked_certificate.url in answer.text,
+                   "relative link resolves to the product whose fact matches the requested term"))
+    for name, question in [
+        ("jumbo certificate link preserves feature checks", "Where can I find the 36-month jumbo certificate rates?"),
+        ("unknown certificate link preserves modifier checks", "Where can I find reverse certificate rates?"),
+    ]:
+        answer = link_system.answer(question)
+        checks.append((name, not answer.confident and linked_certificate.url not in answer.text,
+                       "a labelled link does not establish an unavailable feature or product"))
+    title_only = page("/about/join", "Join", "People who live or work within our charter area may apply.")
+    answer = build(submission, [snapshot(latest, [title_only])]).answer("Who can join?")
+    checks.append(("title-only match admits substantive passage", "charter area" in answer.text
+                   and any(s.url == title_only.url for s in answer.sources),
+                   "page title supplies topic even when body has no query word or heading"))
+    no_hours = page("/contact", "Branch Hours", "Please contact this office for details.")
+    answer = build(submission, [snapshot(latest, [no_hours])]).answer("What are the branch hours?")
+    checks.append(("title-only match preserves answer shape", not answer.confident,
+                   "an hours title cannot turn prose without times into a schedule"))
+    wrong_term = page("/rates", "6-month Certificate Rates", "12-month certificate APY: 6%")
+    answer = build(submission, [snapshot(latest, [wrong_term])]).answer("What is the 6-month certificate APY?")
+    checks.append(("title-only match preserves numeric qualifiers", not answer.confident,
+                   "the title's term and a percentage cannot replace the passage's actual term"))
     return checks
 
 

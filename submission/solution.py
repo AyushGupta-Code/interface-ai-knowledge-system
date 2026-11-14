@@ -16,7 +16,7 @@ from bisect import bisect_right
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 sys.path.insert(0, str(next(d / "harness" for d in Path(__file__).resolve().parents if (d / "harness" / "contract.py").exists())))
 from contract import Answer, Conflict, Snapshot, Source  # noqa: E402
@@ -315,6 +315,7 @@ class Passage:
     table: int = -1    # table id within the page for table rows, -1 otherwise
     label: str = ""    # table caption (heading + labels above the table), for conflict identity
     cells: tuple = ()  # (header, value) pairs for table rows
+    context: str = ""  # governing section, including for links in ordinary prose
 
 
 HEADING = re.compile(r"^#{1,6}\s+(.*)$")
@@ -447,7 +448,7 @@ class KnowledgeBase:
                     continue
                 toks = frozenset(tokens(f"{caption} {text}"))
                 shapes = passage_shapes(kind, text, cells if table >= 0 else ())
-                p = Passage(si, page.url, title, kind, date, text, toks, pg, shapes, table, label, cells)
+                p = Passage(si, page.url, title, kind, date, text, toks, pg, shapes, table, label, cells, caption)
                 pid = len(self.passages)
                 self.passages.append(p)
                 page_toks |= toks
@@ -538,6 +539,10 @@ class KnowledgeBase:
         tr.update(qtoks=qtoks, qnums=qnums, shape=shape)
         if not qtoks:
             return Answer(text=REFUSAL, confident=False)
+        if shape == "link":
+            linked = self._labeled_link(question, si, tr)
+            if linked is not None:
+                return linked
 
         # Stage A: which pages are about the question (title + all their text) and hold an answer of
         # the right shape (times for an hours question, a % on a rate page for a rate question...).
@@ -681,6 +686,84 @@ class KnowledgeBase:
         when = f"as of {taken_on}"
         text = f"{win.title or 'Dupaco'} ({when}):\n{body}\nSource: {win.url}"
         return Answer(text=text, sources=sources)
+
+    def _labeled_link(self, question: str, si: int, trace: dict):
+        """Return actual destinations supported by link labels/sections and target evidence."""
+        family = _family_of(canonical(question))
+        subject = tokens(question) - GENERIC - WORDING - ANSWER_KIND - {"use", "find", "see"}
+        if not subject:
+            return None
+        by_url = defaultdict(list)
+        for pid, p in enumerate(self.passages):
+            if p.snap == si:
+                by_url[urlparse(p.url)._replace(fragment="").geturl().rstrip("/")].append(pid)
+        family_rows = set()
+        required = set()
+        if family:
+            families, vocab = self._family_index()[si]
+            group = [f for f in families if f == family or CATEGORY.get(f) == family]
+            family_rows = {pid for f, pids in families.items()
+                           if f == family or CATEGORY.get(f) == family for pid in pids}
+            scope = re.search(r"\b(personal|business)\b", question, re.I)
+            if scope:
+                by_pid, _ = self._fact_index_get()
+                family_rows = {pid for pid in family_rows if pid in by_pid
+                               and by_pid[pid][1][0].lower() == scope.group(1).lower()}
+            own = set().union(*(vocab[f] for f in group)) if group else set()
+            siblings = set().union(*(vocab[f] for f in families
+                if CATEGORY.get(f, f) == CATEGORY.get(family, family) and f not in group)) - own
+            content = tokens(question) - GENERIC - WORDING - DEFAULT_TIER - ANSWER_KIND
+            modifier = _modifier(canonical(question), family)
+            if scope:
+                content.discard(scope.group(1).lower())
+                if modifier == scope.group(1).lower():
+                    modifier = ""
+            if not family_rows or (modifier and modifier not in own) or content & siblings:
+                return Answer(text=REFUSAL, confident=False)
+            required = content & own
+        links = []
+        for pid, p in enumerate(self.passages):
+            if p.snap != si or p.kind not in ("rates", "product", "other"):
+                continue
+            for label, href in re.findall(r"\[([^\[\]]+)\]\(([^\s)]+)\)", p.text):
+                destination = urljoin(p.url, href)
+                if urlparse(destination).scheme not in ("http", "https"):
+                    continue
+                context = label + " " + p.context
+                if family:
+                    if _family_of(context) != family:
+                        continue
+                elif not subject <= tokens(context):
+                    continue
+                target = urlparse(destination)._replace(fragment="").geturl().rstrip("/")
+                targets = by_url.get(target, [])
+                if family:
+                    targets = [i for i in targets if i in family_rows
+                               and required <= self.passages[i].toks | self.pages[self.passages[i].page][0]
+                               and numbers_ok(question_numbers(question), self.passages[i].text)]
+                if not targets:
+                    continue  # No guessing destinations or following external sites.
+                target_id = min(targets)
+                shown = p.context or label
+                links.append((KIND_RANK[p.kind], destination, pid, target_id, shown))
+        if not links:
+            return Answer(text=REFUSAL, confident=False) if family else None
+        chosen, seen = [], set()
+        for _, destination, pid, target_id, label in sorted(links):
+            if destination not in seen:
+                seen.add(destination)
+                chosen.append((destination, pid, target_id, label))
+            if len(chosen) == 3:
+                break
+        sources = []
+        for _, pid, target_id, _ in chosen:
+            for i in (pid, target_id):
+                p = self.passages[i]
+                if p.url not in {s.url for s in sources}:
+                    sources.append(Source(url=p.url, snapshot_id=self.snaps[si][0], quote=p.text[:200]))
+        trace.update(winner=chosen[0][1], link_answer=True)
+        return Answer(text="Published links:\n" + "\n".join(
+            f"- {label}: {url}" for url, _, _, label in chosen), sources=sources)
 
     def _fact_index_get(self):
         """pid -> (snap, fact key), and (snap, fact key) -> url -> measure -> value; built once."""

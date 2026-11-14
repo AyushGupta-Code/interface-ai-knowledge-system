@@ -151,3 +151,39 @@ Public / reworded / must-refuse / practice / conflict F1: 0.7736 / 0.73 / 17/18 
 Changed item scores: {}.
 
 Stale hits / errors: {"public": [0, 0], "reworded": [0, 0], "refusal": [0, 0], "practice": [0, 0]}. Newly answered refusals: {}.
+
+### Rejected Q4b guard variant (`q4b`)
+
+Scored benchmarks improved (certificate link and its rewordings), but independent synthetic review found rate-link requests could bypass unknown modifiers and jumbo/regular distinctions. Reuse family modifier/sibling/required-word checks for linked targets before retaining.
+
+Command: `python3 dev/run_build_checks.py q4b --previous q4a` (all five checks listed above).
+
+Public / reworded / must-refuse / practice / conflict F1: 0.7969 / 0.7528 / 17/18 / 1.0 / 0.7586; resolution 1.0; conflict negatives 0/8.
+
+Changed item scores: {"public": {"dup-008": [0.0, 1.0]}, "reworded": {"dup-008-p1": [0.0, 1.0], "dup-008-p2": [0.0, 1.0]}}.
+
+Stale hits / errors: {"public": [0, 0], "reworded": [0, 0], "refusal": [0, 0], "practice": [0, 0]}. Newly answered refusals: {}.
+
+### Superseded Q4b feature checkpoint (`q4b_safe`)
+
+Family feature/modifier checks fixed unsupported link requests; scored checks passed. Added structural personal/business target scope before retaining.
+
+Command: `python3 dev/run_build_checks.py q4b_safe --previous q4a` (all five checks listed above).
+
+Public / reworded / must-refuse / practice / conflict F1: 0.7969 / 0.7528 / 17/18 / 1.0 / 0.7586; resolution 1.0; conflict negatives 0/8.
+
+Changed item scores: {"public": {"dup-008": [0.0, 1.0]}, "reworded": {"dup-008-p1": [0.0, 1.0], "dup-008-p2": [0.0, 1.0]}}.
+
+Stale hits / errors: {"public": [0, 0], "reworded": [0, 0], "refusal": [0, 0], "practice": [0, 0]}. Newly answered refusals: {}.
+
+### Kept Q4b (`q4b_scope`)
+
+Published links use actual labels/section context and verified target facts. Family, term, feature, unknown modifier and explicit personal/business scope checks retained. All29 synthetic cases pass. Public certificate link and its two rewordings improve0to1; no other item score changes. Refusal17/18 unchanged; final refusal aggregate has small timing variation.
+
+Command: `python3 dev/run_build_checks.py q4b_scope --previous q4a` (all five checks listed above).
+
+Public / reworded / must-refuse / practice / conflict F1: 0.7969 / 0.7528 / 17/18 / 1.0 / 0.7586; resolution 1.0; conflict negatives 0/8.
+
+Changed item scores: {"public": {"dup-008": [0.0, 1.0]}, "reworded": {"dup-008-p1": [0.0, 1.0], "dup-008-p2": [0.0, 1.0]}}.
+
+Stale hits / errors: {"public": [0, 0], "reworded": [0, 0], "refusal": [0, 0], "practice": [0, 0]}. Newly answered refusals: {}.

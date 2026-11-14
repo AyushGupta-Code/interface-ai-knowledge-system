@@ -57,3 +57,25 @@ read as a procedure question.
 Re-trace: 12 → 2 wrong refusals. Left: dup-080-p2 ("location finder": the site says "Find a branch", and adding
 that synonym would be fitting one question) and dup-104-p2 (a yes/no comparison across branches, which needs
 a different answer type). Public 0.7282, reworded 0.5619, should_refuse still 3/3 on public.
+
+## Every remaining miss (after commit `74ba996`)
+
+`python3 dev/trace_refusals.py --all` (reworded) and `--all --eval eval/public_eval.jsonl`. Public 0.7398,
+reworded 0.6031. Counted by the stage where the best evidence stops (reworded + public items):
+
+| Where it stops | Items | Examples |
+|---|---|---|
+| Specific word is a verb or qualifier, not the subject | 10 | *eligible* (who can join), *received* / *ranked* (Forbes), *took* (VTO), *starting* / *flexibility* (student loans), *online* (apply), *phone*, *each* |
+| Passage score below the relative cutoff (best − 0.15) | 7 | mortgage rows 0.64 vs cutoff 0.67; credit-card rows; Hy-Vee closure date 0.66 vs 0.69; mobile wallet 0.84 vs 0.85 |
+| Tie on score, the wrong passage wins | 7 | two Home$tart articles score 1.00 and the newer unrelated one wins; lobby hours between branch articles; the 2024 vs 2023 VTO article |
+| Page coverage | 4 | "number of branches" (no specific word, generic pages win); "update my contact details" |
+| Answer shape | 4 | "fifth time" is not a number, so no count shape; "is closing; which branches instead" read as a date question; "do hours differ" |
+| Link passages don't name the topic | 2 | `/rates` "See details" links don't contain "certificate" |
+| Page title not used to find passages | 1 | `/about/join` eligibility list has no question word of its own |
+| Can't be won | 3 | dup-005 (empty Answer key) x3 |
+
+**Q4 needs no change.** Ranking already puts product pages before articles (rate page > product > promo >
+calculator > article). Articles win only when no product passage passes the checks.
+
+**Rejected experiment:** taking the specific word only from words that occur on the best-covered pages. Public
+0.7398 → 0.7088, reworded 0.6031 → 0.5956, and one public refusal question started answering. Not kept.

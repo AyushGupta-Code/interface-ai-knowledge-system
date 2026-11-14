@@ -60,8 +60,11 @@ def verdict(kb, tr, pid):
     if not sol.numbers_ok(tr["qnums"], p.text):
         return 3, f"passage: qualifier numbers {tr['qnums']} not matched"
     title = kb.pages[p.page][0]
-    if tr.get("anchor") and tr["anchor"] not in p.toks and tr["anchor"] not in title:
-        return 3, f"passage: specific word '{tr['anchor']}' missing"
+    required = tr.get("anchor") or []
+    required = [required] if isinstance(required, str) else required
+    missing = [w for w in required if w not in p.toks and w not in title]
+    if missing:
+        return 3, f"passage: required word(s) {missing} missing"
     sc = tr.get("score", {}).get(pid)
     if sc is None:
         return 3, "passage: shares no question word"

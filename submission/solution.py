@@ -345,6 +345,7 @@ def split_page(md: str):
 
 class KnowledgeBase:
     def __init__(self):
+        self._fact_index = None
         self.snaps: list[tuple[str, str]] = []         # (snapshot_id, taken_on), oldest first
         self.passages: list[Passage] = []
         self.index: list[dict[str, list[int]]] = []    # per snapshot: token -> passage ids
@@ -356,6 +357,7 @@ class KnowledgeBase:
     def ingest(self, snapshot: Snapshot) -> None:
         si = len(self.snaps)
         self.snaps.append((snapshot.snapshot_id, snapshot.taken_on))
+        self._fact_index = None    # facts across pages, built on first use after the last ingest
         index: dict[str, list[int]] = defaultdict(list)
         page_index: dict[str, list[int]] = defaultdict(list)
         start = len(self.passages)
@@ -483,17 +485,40 @@ class KnowledgeBase:
         tr["winner"] = win_id
         win = self.passages[win_id]
         sid, taken_on = self.snaps[si]
+        sources = [Source(url=win.url, snapshot_id=sid, quote=win.text[:200])]
         if win.table >= 0:
             # Every matching row of the winning table, and only that table (D7).
-            rows = [self.passages[pid] for pid in sorted(cands)
-                    if self.passages[pid].page == win.page and self.passages[pid].table == win.table
-                    and score[pid] >= score[win_id] - 1e-9][:12]
-            body = "\n".join(f"- {r.text}" for r in rows)
+            row_ids = [pid for pid in sorted(cands)
+                       if self.passages[pid].page == win.page and self.passages[pid].table == win.table
+                       and score[pid] >= score[win_id] - 1e-9][:12]
+            body = "\n".join(f"- {self.passages[pid].text}" for pid in row_ids)
+            sources += [Source(url=u, snapshot_id=sid) for u in self._same_fact_pages(row_ids, win.url)]
         else:
             body = win.text if len(win.text) <= 600 else win.text[:600].rsplit(" ", 1)[0] + " ..."
         when = f"as of {taken_on}" if as_of else "currently"
         text = f"{win.title or 'Dupaco'} ({when}):\n{body}\nSource: {win.url}"
-        return Answer(text=text, sources=[Source(url=win.url, snapshot_id=sid, quote=win.text[:200])])
+        return Answer(text=text, sources=sources)
+
+    def _same_fact_pages(self, row_ids, cited: str, limit: int = 5) -> list[str]:
+        """Other rate and product pages in the same snapshot that state every quoted row as the same
+        fact (same product, tier/term and values, by the conflict identity of D10)."""
+        if self._fact_index is None:
+            by_pid, by_fact = {}, defaultdict(lambda: defaultdict(dict))
+            for key, m, snap, kind, url, v, _, pid in self._facts(with_pid=True):
+                by_pid[pid] = (snap, key)
+                by_fact[(snap, key)][url][m] = v
+            self._fact_index = (by_pid, by_fact)
+        by_pid, by_fact = self._fact_index
+        common = None
+        for pid in row_ids:
+            if pid not in by_pid:
+                return []
+            pages = by_fact[by_pid[pid]]
+            mine = pages.get(self.passages[pid].url, {})
+            same = {u for u, vals in pages.items() if vals == mine}
+            common = same if common is None else common & same
+        ok = [u for u in (common or ()) if u != cited and page_kind(u) in ("rates", "product")]
+        return sorted(ok, key=lambda u: (KIND_RANK[page_kind(u)], u))[:limit]
 
     # -----------------------------------------------------------------------------------------
     def conflicts(self) -> list[Conflict]:
@@ -587,9 +612,10 @@ class KnowledgeBase:
                                                 for (u, _), s in sorted(dissent.items())],
                            pages=[urlparse(cur_page[1]).path], stale=sorted({urlparse(u).path for u, _ in dissent}))
 
-    def _facts(self):
+    def _facts(self, with_pid=False):
         """Yield (fact key, measure, snap, kind, url, value, (segment, group, row)) per rate cell of each table row."""
         tables = defaultdict(list)
+        pids = {id(p): i for i, p in enumerate(self.passages)} if with_pid else {}
         for p in self.passages:
             if p.table >= 0 and p.kind != "file" and p.cells:
                 tables[(p.snap, p.url, p.table)].append(p)
@@ -622,7 +648,7 @@ class KnowledgeBase:
                     segment = "Business"
                 name = re.sub(r"\s*\(business\)|^business\s+", "", name, flags=re.I).strip(" —-")
                 if vals:
-                    items.append((name, tuple(quals), " ".join(shown), vals))
+                    items.append((name, tuple(quals), " ".join(shown), vals, id(p)))
             if not items:
                 continue
             family = _family(rows, items, caption, url)
@@ -639,7 +665,7 @@ class KnowledgeBase:
                     items = [(next(iter(same)),) + it[1:] for it in items]
                 elif family in NAMED_FAMILIES:
                     continue               # several products share these tiers: identity unknown
-            for name, quals, shown, vals in items:
+            for name, quals, shown, vals, pkey in items:
                 key = (segment, family, name.lower(), quals)
                 # Report grouping: named deposit products report on their own (Share Savings, Money
                 # Market...); loans, certificates and IRAs report per family, the name joining the row.
@@ -648,7 +674,10 @@ class KnowledgeBase:
                 else:
                     label = (segment, family, " ".join(x for x in [name, shown] if x))
                 for m, v in vals.items():
-                    yield key, m, snap, kind, url, v, label
+                    if with_pid:
+                        yield key, m, snap, kind, url, v, label, pids[pkey]
+                    else:
+                        yield key, m, snap, kind, url, v, label
 
 
 # Conflict identity helpers (D10) ---------------------------------------------------------------
@@ -707,7 +736,7 @@ def _family(rows, items, caption: str, url: str) -> str:
     for name, *_ in items:
         if name and _family_of(name):
             return _family_of(name)
-    deposit = any(m in ("APY", "dividend rate") for *_, vals in items for m in vals)
+    deposit = any(m in ("APY", "dividend rate") for _, _, _, vals, _ in items for m in vals)
     labels = [p.cells[0][1] for p in rows]
     if deposit and all(re.search(r"\b\d+\s*months?\b|certificate", l, re.I) for l in labels):
         return "IRA" if any(_family_of(l) == "IRA" for l in labels) else "Certificate"

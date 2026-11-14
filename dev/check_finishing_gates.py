@@ -287,6 +287,19 @@ def sixth_snapshot_checks(submission: Path, source: Path) -> list[tuple[str, boo
                        env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"),
                        capture_output=True, text=True, check=True, timeout=300)
         report = json.loads((output_path / "report.json").read_text())
+        if report["final_score"] != 1.0 or report["errors"] or report["stale_trap_hits"]:
+            # Local diagnostics only: generated output and copied website data stay in /tmp.
+            records = [json.loads(line) for line in (output_path / "per_question.jsonl").read_text().splitlines()]
+            print("SIXTH_HARNESS_FAILURE", json.dumps([
+                {"id": row["id"], "score": row["score"], "trap_hits": row["trap_hits"],
+                 "answer": row["answer"]["text"]} for row in records if row["score"] != 1.0]))
+            emitted = {line.removeprefix("- ") for line in answer.text.splitlines()}
+            facts = []
+            for key, measure, snap, kind, url, value, label, pid in system._facts(with_pid=True):
+                if snap == len(snapshots) - 1 and system.passages[pid].text in emitted:
+                    facts.append({"identity": key, "measure": measure, "value": value,
+                                  "url": url, "label": label})
+            print("SIXTH_CURRENT_EMITTED_FACTS", json.dumps(facts))
         return [
             ("sixth snapshot is full", len(snapshots) == len(dirs) + 1 and len(snapshots[-1].pages) == len(snapshots[-2].pages),
              "all prior snapshots copied; October has all latest pages"),

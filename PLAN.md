@@ -220,8 +220,17 @@ Stale hits / errors: {"public": [0, 0], "reworded": [0, 0], "refusal": [0, 0], "
 - Practice final **1.0000**,5/5 questions, conflict F1/resolution1.0,0errors/traps. Local Dupaco conflict benchmark F1 **0.7586**,18submitted,11matched,resolution1.0,negatives0/8.
 - `python3 dev/check_finishing_gates.py` passes **36/36** synthetic date, fallback, cache, provenance, parsing, title, link and article checks. Fixtures are invented development cases, not a holdout.
 - `python3 dev/check_finishing_gates.py --determinism` passes **37/37**, including identical all-set answer/source/conflict digests across seeds0,1,42. Digest864cf1291f011cfb35148b1b2c3ff808a92157c1a11d4cb43e196787db1fde81.
-- Full sixth-snapshot direct checks passed40/40. A stricter actual-harness check with the same mutation is being investigated separately; do not treat direct value presence alone as a full stale-trap pass.
+- Full sixth-snapshot direct checks passed40/40. The stricter actual-harness gate FAILS:40/41 checks, synthetic final0.575,1stale trap,0errors. Current item0.15, historicalitem1.0. Current output includes legitimate Business3.40% plus Personal/rates4.44% AND stale Personal/product3.40% for the same fact. The unqualified trap also penalizes the distinct business scope, but the same-personal-identity duplication is a genuine bug. Preserve this failure; no extra tuning beyond the agreed bounded round.
 - Actual Python3.11 runtime is unavailable (`command -v python3.11` exits1). `ast.parse(..., feature_version=(3,11))` passes for solution.py; this is syntax validation, not a Python3.11 runtime pass. Available interpreter Python3.14.4.
 - Final traces: `PYTHONHASHSEED=0 python3 dev/trace_refusals.py --all --eval eval/public_eval.jsonl` and `PYTHONHASHSEED=0 python3 dev/trace_refusals.py --all`, stored under ignored `results/build/deterministic/`. The tracer finds possible evidence by answer values; its numeric hits are not proof of fact identity.
 
 Implementation commits: Q1 `b31ee8b`; Q2 `5f751bc`; Q3 `9db570d`; Q4a `40ec396`; Q4b `fe88773`; Q4c `952e65c`; determinism `a54a3b4`.
+
+
+### Final cold checkout and unresolved gates
+
+A fresh `git clone --no-hardlinks` of the committed implementation to a task-created /tmp directory, with the supplied local archive directory made available, ran with an empty environment and `python3 -S` (no site packages/API keys): practice **1.0000**,public **0.8512**,0errors/traps,p95public **0.23s**. Logs: `results/build/cold-clone-practice.log`, `cold-clone-public.log`. The available interpreter is3.14.4; this does not pass the actual3.11 runtime gate. Temporary clone removed after verification.
+
+Outstanding: final-score gap0.0569>0.05; strict sixth-snapshot stale-copy gate fails; actual Python3.11 run unavailable; J.D.Power must-refuse remains failed. Public0.85 target is met, so no relaxation of that target is needed. The stricter mutation exposes existing broad-list assembly using `(fact identity, values)` for deduplication, which retains conflicting copies of one fact instead of resolving to the authoritative value first. This contradicts the intended D6/D7 authority guarantee for family lists. It requires a separately authorized general fact-resolution fix, not another public-wording tweak.
+
+No source code changed after the final five-suite/determinism validation. Final reviewer found no remaining issues within the agreed diffs; the mutation gate is a newly documented system limitation. No untouched set created or used; system-design figure unchanged; no pushes.

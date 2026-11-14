@@ -656,7 +656,48 @@ class KnowledgeBase:
             reports.append(((kind, tuple(values)), Conflict(
                 topic=f"{segment} {group} rates ({label})", values=values, sources=sources,
                 resolution="; ".join(f"{f['row']}: {f['resolution']}" for f in fs), reason=reason)))
-        return _merge_copies(reports)
+        return _merge_copies(reports) + self._article_conflicts()
+
+    def _article_conflicts(self) -> list[Conflict]:
+        """D10 for article text: organisation-wide counts that newsroom articles state differently.
+
+        Each observation is (fact, value, the article's own publication date, url). Older articles were
+        right when published, so this is a dated disagreement, not an error: the newest article's value
+        is current. Two bounded patterns: branch-office counts, and "the Nth time <awarder> recognized
+        Dupaco" (kept apart per award program, taken from the article title)."""
+        newest = {}                        # url -> passages of its newest snapshot
+        for p in self.passages:
+            if p.kind == "article" and p.date:
+                if p.url not in newest or self.snaps[p.snap][1] > self.snaps[newest[p.url][0].snap][1]:
+                    newest[p.url] = [p]
+                elif self.snaps[p.snap][1] == self.snaps[newest[p.url][0].snap][1]:
+                    newest[p.url].append(p)
+        obs = defaultdict(dict)            # fact -> url -> (date, value)
+        for url, ps in newest.items():
+            for p in ps:
+                for m in BRANCH_COUNT.finditer(p.text):
+                    obs[("Number of Dupaco branch offices", "")][url] = (p.date, m.group(1))
+                for m in TIMES_RECOGNIZED.finditer(p.text):
+                    program = re.sub(r"\s+", " ", p.title.lower()).strip()
+                    obs[(f"Times {m.group(2)} has recognized Dupaco", program)][url] = (p.date, m.group(1).lower())
+        out = []
+        for (topic, program), seen in obs.items():
+            dated = sorted(seen.items(), key=lambda kv: kv[1][0], reverse=True)   # newest article first
+            values = list(dict.fromkeys(v for _, (_, v) in dated))
+            if len(values) < 2:
+                continue
+            first = {}
+            for url, (date, v) in dated:
+                first.setdefault(v, (date, url))
+            sid = self.snaps[self._snapshot_for(None)][0]
+            out.append(Conflict(
+                topic=f"{topic}{' (' + program + ')' if program else ''} (newsroom articles disagree)",
+                values=values,
+                sources=[Source(url=first[v][1], snapshot_id=sid) for v in values],
+                resolution=values[0],
+                reason="dated observations: " + "; ".join(f"{v} in the article of {first[v][0]}" for v in values)
+                       + "; older articles were accurate when published, the newest article's value is current"))
+        return out
 
     def _fact_conflicts(self):
         """Fact-level findings: one dict per (fact, kind) with its values, resolution and evidence."""
@@ -824,6 +865,13 @@ FAMILIES = [
 # never name a feature, so they are not checked against sibling products (the Rewards Visa's tier
 # happens to be called "Standard").
 DEFAULT_TIER = set("standard regular normal basic ongoing purchase".split())
+
+# Article facts for conflicts (D10). Organisation-wide statements only: "It has ... 22 branch office
+# locations" (the newsroom boilerplate) and "Dupaco now operates 22 branches", not "Dupaco's 18 branches"
+# in a biography.
+BRANCH_COUNT = re.compile(r"\b(?:has|operates)\b[^.]{0,60}?\b(\d{1,3}) (?:branch office locations|branches)\b")
+TIMES_RECOGNIZED = re.compile(r"\b(?:was|is) the (first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth) "
+                              r"time ([A-Z][\w.]+) (?:has )?(?:recognized|named|ranked)\b", re.I)
 
 # Families that name a whole category in a question ("credit card rates" -> every card).
 CATEGORY = {"Platinum Visa": "Credit Card", "Rewards Visa": "Credit Card",

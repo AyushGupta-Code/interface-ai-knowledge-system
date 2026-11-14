@@ -3,8 +3,8 @@
 Positives: dev/conflicts_gold.json, in the scorer's gold format plus our evidence fields. Scored with the
 scorer's own score_conflicts(), so precision, recall, F1 and resolution mean what they mean at grading.
 Negatives: dev/conflicts_negative.json. A negative fails when one submitted conflict lists all its values
-as separate competing entries and its topic names one of the keywords (e.g. two balance tiers reported
-as a contradiction).
+as separate competing entries for the same row and its topic names one of the keywords (e.g. two balance
+tiers reported as a contradiction).
 
 Usage: python3 dev/check_conflicts.py [--snapshots snapshots] [--show]
 """
@@ -31,11 +31,18 @@ def matches(conflict, gold) -> bool:
 def trips(conflict, neg) -> bool:
     if not any(_norm(k) in _norm(conflict.topic or "") for k in neg["topic_keywords"]):
         return False
-    homes = [[i for i, e in enumerate(conflict.values or []) if contains(e, v)] for v in neg["values"]]
-    if not all(homes):
-        return False
-    # competing = each value has an entry of its own, not all inside one entry (e.g. "4.10% APY / 4.06% dividend")
-    return len({i for h in homes for i in h}) > 1 and not any(set.intersection(*map(set, homes)))
+    # Grouped reports hold one line per row ("<row>: <values>"); only lines of the same row compete.
+    rows = {}
+    for i, e in enumerate(conflict.values or []):
+        rows.setdefault(e.rsplit(": ", 1)[0] if ": " in e else "", []).append((i, e))
+    for lines in rows.values():
+        homes = [[i for i, e in lines if contains(e, v)] for v in neg["values"]]
+        if not all(homes):
+            continue
+        # competing = each value has a line of its own, not all inside one line (e.g. "4.10% APY / 4.06% dividend")
+        if len({i for h in homes for i in h}) > 1 and not any(set.intersection(*map(set, homes))):
+            return True
+    return False
 
 
 def main():

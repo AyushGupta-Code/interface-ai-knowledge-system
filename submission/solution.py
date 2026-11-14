@@ -455,29 +455,60 @@ class KnowledgeBase:
 
     # -----------------------------------------------------------------------------------------
     def conflicts(self) -> list[Conflict]:
-        """D10: one rate fact (segment + product + tier/term), compared measure by measure.
+        """D10: precise facts inside, readable reports outside.
 
-        Two kinds, reported separately and named in `reason`:
-        - history: the fact's value on its reference page changed between snapshots;
-        - disagreement: in one snapshot, two pages show different values for the same fact
-          (typically a stale calculator, promo or guidance page).
-        Balance tiers, terms, APR vs APY and personal vs business products are different facts,
-        so they are never compared with each other.
+        Inside, a fact is one table row's identity (segment + product + tier/term/model-year band),
+        compared measure by measure, so balance tiers, APR vs APY and personal vs business are never
+        compared with each other (see _fact_conflicts). Outside, the fact-level findings of one product
+        and one kind are grouped into a single report ("Personal Home Loan rates (changed over time)"),
+        one value line per row, so a single rate-sheet update reads as one event, not twenty rows.
         """
+        groups = {}
+        for f in self._fact_conflicts():
+            groups.setdefault((f["kind"], f["segment"], f["group"]), []).append(f)
+        reports = []
+        for (kind, segment, group), fs in groups.items():
+            values = [f"{f['row']}: {v}" for f in fs for v in f["values"]]
+            sources, seen = [], set()
+            for f in fs:
+                for src in f["sources"]:
+                    if (src.url, src.snapshot_id) not in seen:
+                        seen.add((src.url, src.snapshot_id))
+                        sources.append(src)
+            pages = sorted({p for f in fs for p in f["pages"]})
+            if kind == "history":
+                dates = sorted({d for f in fs for d in f["dates"]})
+                label = "changed over time"
+                reason = (f"history: {len(fs)} rate row(s) changed on {', '.join(pages)} "
+                          f"({' -> '.join(dates)}); the newest snapshot's value is current, "
+                          f"older values are not contradictions")
+            else:
+                label = "pages disagree"
+                stale = sorted({p for f in fs for p in f["stale"]})
+                reason = (f"disagreement: {', '.join(stale)} show different values than {', '.join(pages)} "
+                          f"in the same snapshot; the most authoritative page in the newest snapshot wins "
+                          f"(rate page > product > promo > calculator > article)")
+            reports.append(((kind, tuple(values)), Conflict(
+                topic=f"{segment} {group} rates ({label})", values=values, sources=sources,
+                resolution="; ".join(f"{f['row']}: {f['resolution']}" for f in fs), reason=reason)))
+        return _merge_copies(reports)
+
+    def _fact_conflicts(self):
+        """Fact-level findings: one dict per (fact, kind) with its values, resolution and evidence."""
         order = sorted(range(len(self.snaps)), key=lambda i: self.snaps[i][1])
         age = {s: len(order) - 1 - i for i, s in enumerate(order)}    # 0 = newest snapshot
         facts = defaultdict(list)          # fact -> [(snap, rank, url, measure, value)]
-        topics = {}                        # fact -> readable topic, worded as the newest, most authoritative row
-        for key, measure, snap, kind, url, value, topic in self._facts():
+        labels = {}                        # fact -> (segment, group, row), worded as the newest, most authoritative row
+        for key, measure, snap, kind, url, value, label in self._facts():
             facts[key].append((snap, KIND_RANK[kind], url, measure, value))
             rank = (KIND_RANK[kind], age[snap])
-            if key not in topics or rank < topics[key][0]:
-                topics[key] = (rank, topic)
-        out = []
+            if key not in labels or rank < labels[key][0]:
+                labels[key] = (rank, label)
         for key, obs in facts.items():
             if min(r for _, r, *_ in obs) > KIND_RANK["product"]:
                 continue                   # identity is trusted only when a rate or product page states it
-            topic = topics[key][1]
+            segment, group, row = labels[key][1]
+            base = {"segment": segment, "group": group, "row": row}
             pages = defaultdict(lambda: defaultdict(dict))   # (rank, url) -> snap -> measure -> value
             for snap, rank, url, m, v in obs:
                 pages[(rank, url)][snap][m] = v
@@ -495,14 +526,9 @@ class KnowledgeBase:
                 if v is not None and (not changes or _differs(v, changes[-1][1])):
                     changes.append((s, v))
             if len(changes) > 1:
-                out.append(Conflict(
-                    topic=f"{topic} (changed over time)",
-                    values=[_show(v) for _, v in changes],
-                    sources=[Source(url=ref[1], snapshot_id=self.snaps[s][0]) for s, _ in changes],
-                    resolution=_show(cur),
-                    reason=f"history on {urlparse(ref[1]).path}: "
-                           + " -> ".join(f"{_show(v)} ({self.snaps[s][1]})" for s, v in changes)
-                           + "; the newest snapshot's value is current, older values are not contradictions"))
+                yield dict(base, kind="history", values=[_show(v) for _, v in changes], resolution=_show(cur),
+                           sources=[Source(url=ref[1], snapshot_id=self.snaps[s][0]) for s, _ in changes],
+                           pages=[urlparse(ref[1]).path], dates=[self.snaps[s][1] for s, _ in changes[1:]])
             # 2) disagreement inside one snapshot
             dissent, refs = {}, set()      # (url, shown value) -> newest snapshot showing it
             for s in present:
@@ -514,20 +540,13 @@ class KnowledgeBase:
                         refs.add(_show(ref_v))
             values = [_show(cur)] + sorted(({v for _, v in dissent} | refs) - {_show(cur)})
             if dissent and len(values) > 1:
-                where = sorted({urlparse(u).path for u, _ in dissent})
-                out.append(Conflict(
-                    topic=f"{topic} (pages disagree)",
-                    values=values,
-                    sources=[cur_src] + [Source(url=u, snapshot_id=self.snaps[s][0])
-                                         for (u, _), s in sorted(dissent.items())],
-                    resolution=_show(cur),
-                    reason=f"disagreement: {', '.join(where)} show a different value than "
-                           f"{urlparse(cur_page[1]).path} in the same snapshot; the most authoritative "
-                           f"page in the newest snapshot wins (rate page > product > promo > calculator > article)"))
-        return _merge_copies(out)
+                yield dict(base, kind="disagreement", values=values, resolution=_show(cur),
+                           sources=[cur_src] + [Source(url=u, snapshot_id=self.snaps[s][0])
+                                                for (u, _), s in sorted(dissent.items())],
+                           pages=[urlparse(cur_page[1]).path], stale=sorted({urlparse(u).path for u, _ in dissent}))
 
     def _facts(self):
-        """Yield (fact key, measure, snap, kind, url, value, topic) for each rate cell of each table row."""
+        """Yield (fact key, measure, snap, kind, url, value, (segment, group, row)) per rate cell of each table row."""
         tables = defaultdict(list)
         for p in self.passages:
             if p.table >= 0 and p.kind != "file" and p.cells:
@@ -579,30 +598,31 @@ class KnowledgeBase:
                 elif family in NAMED_FAMILIES:
                     continue               # several products share these tiers: identity unknown
             for name, quals, shown, vals in items:
-                product = _product(name, family)
                 key = (segment, family, name.lower(), quals)
-                topic = " ".join(x for x in [segment, product, shown] if x)
+                # Report grouping: named deposit products report on their own (Share Savings, Money
+                # Market...); loans, certificates and IRAs report per family, the name joining the row.
+                if family in NAMED_FAMILIES and name:
+                    label = (segment, _product(name, family), shown)
+                else:
+                    label = (segment, family, " ".join(x for x in [name, shown] if x))
                 for m, v in vals.items():
-                    yield key, m, snap, kind, url, v, topic
+                    yield key, m, snap, kind, url, v, label
 
 
 # Conflict identity helpers (D10) ---------------------------------------------------------------
-def _merge_copies(conflicts: list) -> list:
-    """One rate published under several products (personal and business certificate, Roth and
-    Traditional IRA) changes as one event: conflicts with identical values become one entry."""
-    groups = {}
-    for c in conflicts:
-        kind = c.topic[c.topic.rindex(" ("):]
-        groups.setdefault((kind, tuple(c.values)), []).append(c)
-    out = []
-    for (kind, _), cs in groups.items():
-        first = cs[0]
-        if len(cs) > 1:
-            first.topic = "; ".join(c.topic[: -len(kind)] for c in cs) + kind
-            seen = {(s.url, s.snapshot_id) for s in first.sources}
-            first.sources += [s for c in cs[1:] for s in c.sources if (s.url, s.snapshot_id) not in seen]
-        out.append(first)
-    return out
+def _merge_copies(reports: list) -> list:
+    """One rate sheet published under several products (personal and business certificates) changes
+    as one event: reports with the same kind and identical value lines become one report."""
+    merged = {}
+    for key, c in reports:
+        if key in merged:
+            first = merged[key]
+            first.topic = first.topic.replace(" rates (", " rates; " + c.topic.split(" rates (")[0] + " rates (", 1)
+            seen = {(src.url, src.snapshot_id) for src in first.sources}
+            first.sources += [src for src in c.sources if (src.url, src.snapshot_id) not in seen]
+        else:
+            merged[key] = c
+    return list(merged.values())
 
 
 PRODUCT_COL = re.compile(r"account type|ira type|card type|product")

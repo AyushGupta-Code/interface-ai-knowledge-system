@@ -148,9 +148,10 @@ def answer_shape(question: str) -> str:
         return "address"
     if re.search(r"\bhow many\b|\bnumber of\b", q):
         return "count"
-    if re.search(r"\b(fees?|charges?|costs?)\b", q):
-        return "fee"
-    if re.search(r"\b(rates?|apr|apy|dividends?|interest|yield)\b", q):
+    rate_words = re.search(r"\b(rates?|apr|apy|dividends?|interest|yield)\b", q)
+    if re.search(r"\bfees?\b", q) or (re.search(r"\b(charges?|costs?)\b", q) and not rate_words):
+        return "fee"       # "what APR do you charge" asks for a rate, not a fee
+    if rate_words:
         return "rate"
     return "any"
 
@@ -363,6 +364,7 @@ class KnowledgeBase:
         si = len(self.snaps)
         self.snaps.append((snapshot.snapshot_id, snapshot.taken_on))
         self._fact_index = None    # facts across pages, built on first use after the last ingest
+        self._fam_index = None
         index: dict[str, list[int]] = defaultdict(list)
         page_index: dict[str, list[int]] = defaultdict(list)
         start = len(self.passages)
@@ -451,6 +453,32 @@ class KnowledgeBase:
         anchor = max(specific, key=lambda w: idf[w]) if specific else None
         tr.update(anchor=anchor, idf=idf)
 
+        # D9 for rates, by product family (replaces the one-word veto when the question names a family):
+        # the rate must come from a row of that family (Share Savings, not the Money Market on the same
+        # page); question words that this family's rows use must be in the row (jumbo, platinum, share);
+        # a modifier or feature that only a sibling product has ("introductory" on the Rewards Visa), or
+        # that no row of the family has ("reverse", "interest-only" mortgage, "Unicorn" Savings), refuses.
+        fam_rows, required = None, set()
+        qfam = _family_of(canonical(question)) if shape == "rate" else ""
+        tr["family"] = qfam
+        if shape == "rate" and not qfam:
+            # A rate for a product the site has no rate family for (construction, payday, student loans).
+            return Answer(text=REFUSAL, confident=False)
+        if qfam:
+            by_family, vocab = self._family_index()[si]
+            group = [f for f in by_family if f == qfam or CATEGORY.get(f) == qfam]
+            fam_rows = {pid for f in group for pid in by_family[f]}
+            own = set().union(*(vocab[f] for f in group)) if group else set()
+            siblings = set().union(*(vocab[f] for f in by_family if CATEGORY.get(f, f) == CATEGORY.get(qfam, qfam)
+                                     and f not in group)) - own
+            content = qtoks - GENERIC - WORDING - DEFAULT_TIER
+            modifier = _modifier(canonical(question), qfam)
+            tr.update(family=qfam, modifier=modifier, sibling_words=sorted(content & siblings))
+            if not fam_rows or (modifier and modifier not in own) or content & siblings:
+                return Answer(text=REFUSAL, confident=False)
+            required, anchor = content & own, None
+            tr.update(anchor=sorted(required))
+
         def search(pages):
             score = {}
             for t in qtoks:
@@ -462,6 +490,8 @@ class KnowledgeBase:
                         continue
                     title_toks = self.pages[p.page][0]
                     if anchor and anchor not in p.toks and anchor not in title_toks:
+                        continue
+                    if fam_rows is not None and (pid not in fam_rows or not required <= p.toks | title_toks):
                         continue
                     own = sum(idf[x] for x in qtoks & p.toks)
                     from_title = sum(idf[x] for x in (qtoks & title_toks) - p.toks)
@@ -515,6 +545,17 @@ class KnowledgeBase:
         when = f"as of {taken_on}" if as_of else "currently"
         text = f"{win.title or 'Dupaco'} ({when}):\n{body}\nSource: {win.url}"
         return Answer(text=text, sources=sources)
+
+    def _family_index(self):
+        """Per snapshot: product family -> its rate-row passage ids, and family -> words its rows use."""
+        if getattr(self, "_fam_index", None) is None or len(self._fam_index) != len(self.snaps):
+            fams = [(defaultdict(set), defaultdict(set)) for _ in self.snaps]
+            for key, m, snap, kind, url, v, _, pid in self._facts(with_pid=True):
+                by_family, vocab = fams[snap]
+                by_family[key[1]].add(pid)
+                vocab[key[1]] |= self.passages[pid].toks
+            self._fam_index = fams
+        return self._fam_index
 
     def _same_fact_pages(self, row_ids, cited: str, limit: int = 5) -> list[str]:
         """Other rate and product pages in the same snapshot that state every quoted row as the same
@@ -737,6 +778,31 @@ FAMILIES = [
     (r"checking", "Checking"),
     (r"savings", "Savings"),
 ]
+
+
+# Words asking for a product's ordinary rate rather than a special one ("standard purchase APR"): they
+# never name a feature, so they are not checked against sibling products (the Rewards Visa's tier
+# happens to be called "Standard").
+DEFAULT_TIER = set("standard regular normal basic ongoing purchase".split())
+
+# Families that name a whole category in a question ("credit card rates" -> every card).
+CATEGORY = {"Platinum Visa": "Credit Card", "Rewards Visa": "Credit Card",
+            "Home Loan Refinance": "Home Loan", "Home Equity Loan": "Home Loan",
+            "Home Equity Line of Credit": "Home Loan", "Home Improvement Loan": "Home Loan"}
+
+
+def _modifier(question: str, family: str) -> str:
+    """The word right before the family's name in the question ("reverse mortgage" -> "reverse"),
+    or '' if it is a number, a stop word or a category word."""
+    for pat, fam in FAMILIES:
+        if fam == family:
+            m = re.search(pat, question, re.I)
+            if not m:
+                return ""
+            before = re.findall(r"[a-z]+", question[:m.start()].lower())
+            w = stem(before[-1]) if before else ""
+            return "" if not w or w in STOP or w in GENERIC or w in WORDING or w in DEFAULT_TIER or len(w) < 2 else w
+    return ""
 
 
 def _family_of(text: str) -> str:

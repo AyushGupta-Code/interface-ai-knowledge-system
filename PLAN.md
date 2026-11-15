@@ -259,3 +259,9 @@ Every step: practice 1.0, conflict F1 0.759 / resolution 1.0 / 0/8 negatives, 0 
 **Codex's 24 new rewrites** (not independent): procedure 2/3 (Codex's prototype 3/3: "How should I amend the contact details…" is answered by a Scholarships passage, "authority to amend", because a product page beats the fallback), comparison 3/3, unsupported award 3/3; eligibility, lobby, drive-up and supported-Forbes rewrites still 0/3, as at baseline.
 
 **Rejected in Codex's review:** whole-page anchor context (reworded 0.7796); first H1 as title plus page-local cutoff (public 0.8744, but its student-loan "gain" was housing advice from an article whose title says "student"); derivational morphology (no score change); canonical-hours citations (no honest source to substitute). dup-081 (who can join) stays unsolved: the states are in the service-area text, not the eligibility rules, and conflating the two would be wrong.
+
+## Untouched test set (2026-11-15)
+
+Written by a fresh Codex session that was told not to open submission/, dev/, PLAN.md, NOTES.md or results/, and not to run the system: 36 questions (4 per category; 18 rewordings of public questions, 14 new, 4 refusals; 6 paraphrase groups; 4 historical as_of). Kept local only (`.git/info/exclude`): `dev/untouched_eval.jsonl`, evidence in `dev/untouched_evidence.md`.
+
+Seal: `sha256sum dev/untouched_eval.jsonl` → `d277a765cc3bdf13427f5b963254b80f8111aa5e72173ba566b3f61a80f07ed6`, recorded before the run. Key check without running the system: every must_include value is in the snapshot the question's date selects (scorer's `contains()`) and on the expected source page; no must_not_include value overlaps the key; spot-checked refusals 33 (7/1 ARM rate) and 35 (Mullan Saturday hours) are not stated in the snapshots. Run once at solution commit `ad7587f`; no fixes after it.

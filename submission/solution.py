@@ -109,6 +109,35 @@ def canonical(text: str) -> str:
     return t
 
 
+SENTENCE_END = re.compile(r"(?<![ap]\.m\.)(?<![A-Z]\.)(?<=[.!?])\s+(?=[\"'“A-Z])")
+LEAD_IN = re.compile(r"^.*?(?::\s+|,\s+but\s+)(?=\S.*\?$)", re.S)
+NAME_WORD = re.compile(r"(?<=[\w,;)] )(?:[A-Z][\w$&'’.-]*)(?:\s+[A-Z][\w$&'’.-]*)*")
+
+
+def focus_question(question: str) -> str:
+    """The part of a member's message that asks the question.
+
+    "My spouse and I were chatting about this. What is the routing number? Thanks!" asks only the middle
+    sentence: when a message has several sentences and some end with "?", those are the question, and a
+    lead-in before a colon or ", but" ("Quick question before I head out: What is...?") is dropped too.
+    The other sentences keep only their names ("I'm stopping at the Peosta branch. What's its address?"
+    still needs Peosta). A question too short to name its subject ("... How?") keeps the whole message.
+    Initials ("J.D. Power") and times ("9 a.m. Saturday") don't end a sentence. Numbers are read from the whole message by question_numbers()."""
+    sentences = [x.strip() for x in SENTENCE_END.split(question.strip()) if x.strip()]
+    asked = [x for x in sentences if x.endswith("?")]
+    if not asked:
+        return question
+    core = " ".join(LEAD_IN.sub("", x) for x in asked)
+    if not tokens(core):
+        return question   # "I need to update my contact details. How?": the subject is in the other sentence
+    rest = " ".join(x for x in sentences if x not in asked)
+    rest += " " + " ".join(x[:len(x) - len(LEAD_IN.sub("", x))] for x in asked)
+    names = [n for n in NAME_WORD.findall(" " + rest) if n != "Dupaco" and not re.match(r"I\b", n)]
+    if core == question.strip():
+        return question
+    return core + (" (" + ", ".join(names) + ")" if names else "")
+
+
 def tokens(text: str) -> set[str]:
     """Content words only; numbers are handled by the qualifier check."""
     out = set()
@@ -504,7 +533,9 @@ class KnowledgeBase:
         """Prefer selected-snapshot evidence; missing pages may supply dated history."""
         tr = _trace if _trace is not None else {}
         selected = self._snapshot_for(as_of)
-        ans = self._answer_snapshot(question, selected, tr)
+        message, question = question, focus_question(question)
+        tr["focus"] = question
+        ans = self._answer_snapshot(question, selected, tr, message)
         if ans.confident and not as_of:
             ans.text = ans.text.replace(f"(as of {self.snaps[selected][1]}):", "(currently):", 1)
         if ans.confident or selected is None:
@@ -528,7 +559,7 @@ class KnowledgeBase:
         for old in sorted((i for i, (_, d) in enumerate(self.snaps) if d < limit),
                           key=lambda i: self.snaps[i][1], reverse=True):
             past_trace = {}
-            past = self._answer_snapshot(question, old, past_trace)
+            past = self._answer_snapshot(question, old, past_trace, message)
             if not past.confident:
                 continue
             win = self.passages[past_trace["winner"]]
@@ -563,14 +594,14 @@ class KnowledgeBase:
             cache[si] = {p.url for p in self._snap_passages(si)}
         return cache[si]
 
-    def _answer_snapshot(self, question: str, si, _trace=None) -> Answer:
+    def _answer_snapshot(self, question: str, si, _trace=None, message=None) -> Answer:
         """_trace: optional dict filled with every stage's intermediate results (dev/trace_refusals.py)."""
         tr = _trace if _trace is not None else {}
         tr["snap"] = si
         if si is None:
             return Answer(text=REFUSAL, confident=False)
         qtoks = tokens(question) - ANSWER_KIND
-        qnums = question_numbers(question)
+        qnums = question_numbers(message or question)   # "I'm buying a 2025 car. What APR...?"
         shape = answer_shape(question)
         tr.update(qtoks=qtoks, qnums=qnums, shape=shape)
         if not qtoks:

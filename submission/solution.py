@@ -167,7 +167,10 @@ def tokens(text: str) -> set[str]:
     for w in re.findall(r"[a-z]+", canonical(text)):
         if w in STOP or len(w) < 2:
             continue
-        out.add(stem(w))
+        w = stem(w)
+        if w in STOP:
+            continue   # "whats", "thats" typed without the apostrophe
+        out.add(w)
     return out
 
 
@@ -195,12 +198,18 @@ def answer_shape(question: str) -> str:
     q = question.lower()
     if re.search(r"\bhow (?:do|can|should) (?:i|we) (?:change|update|edit|correct)\b", q):
         return "any"   # "How do I change my address?" asks for a procedure, not an address
-    if re.search(r"\b(link|url|website|web ?page)\b|which page|where (?:on|can i (?:find|see)|do i (?:find|see))", q):
+    if (re.search(r"\b(?:terms?|term lengths?|repayment periods?)\b", q) and _family_of(canonical(q))
+            and re.search(r"\b(?:every|all|list|which|what|options?|available|choose)\b", q)):
+        return "rate"      # "List every certificate term": the family's rate rows, one per term
+    # A link request names a link or asks which page has something; "not sure which page to trust" doesn't.
+    if re.search(r"\b(link|url|website|web ?page)\b|\bwhich page (?:lists|has|shows|covers|explains|describes|do|should|can)\b"
+                 r"|where (?:on|can i (?:find|see)|do i (?:find|see))", q):
         return "link"
     if re.search(r"\bwhat date\b|\bstill (?:open|visit|go|use|bank)\b|\bopen (?:now|anymore)\b|\bclosing\b|\bshut down\b"
-                 r"|\bwhen (?:does|will|did)\b.*\bclose", q) and not re.search(r"\binstead\b|\bwhich branch|\bwhere\b", q):
-        return "date"
-    if re.search(r"\bhours?\b|what time|\bwhen\b.*\bopen\b|\bwhen can (?:i|we) (?:visit|stop by|come (?:in|by))\b", q):
+                 r"|\bwhen (?:does|will|did)\b.*\bclose", q) and not re.search(r"\binstead\b|\bwhich branch|\bwhere\b", q) \
+            and not re.search(r"\btimes?\b|\bhours?\b|\bschedule\b", q):
+        return "date"      # "closing time" / "closing hours" ask for hours, not the date a branch closes
+    if re.search(r"\bhours?\b|what time|\b(?:opening|closing) times?\b|\bwhen\b.*\bopen\b|\bwhen can (?:i|we) (?:visit|stop by|come (?:in|by))\b", q):
         return "hours"
     if re.search(r"\baddress\b|\bwhere is\b|\blocated\b", q):
         return "address"
@@ -291,6 +300,14 @@ GENERAL_HOURS = {stem(w) for w in """lobby lobbies driveup drive up thru through
     normal regular standard open opening close closing visit weekday weekdays weekend weekends monday tuesday wednesday thursday friday saturday
     sunday""".split()}
 SERVICE_SCHEDULE = re.compile(r"\*\*(Lobby|Drive-up)\*\*\s*·?\s*(.+)", re.I)
+# "How many staffed drive-up windows does the Galena branch have?": the counted thing is the last word
+# before the verb. A count answer must state a number of that thing ("22 branches", "two windows").
+COUNT_OF = re.compile(r"\bhow many\s+((?:[\w$'-]+\s+){0,4}?)(?:does|do|did|are|is|were|was|has|have|had|can|will|would"
+                      r"|should|in|at|on|of|for|per|across)\b", re.I)
+NUMBER_WORD = (r"(?:\d[\d,]*|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|"
+               r"fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|hundred|dozens?|several)")
+LIST_WORDS = {stem(w) for w in "every all list offer offered choose available option options term terms length lengths period periods".split()}
+LIST_ASKED = re.compile(r"\b(?:every|all|list)\b|\b(?:which|what) terms?\b|\bterms?\b.*\b(?:available|offer\w*|choose)\b", re.I)
 DIAL_CODE = re.compile(r"\+\d{1,4}\b")
 # "How do I change / update ... ?": a request for a procedure on the member's own account.
 PROCEDURE = re.compile(r"\b(?:how|process|steps?)\b", re.I)
@@ -573,7 +590,7 @@ class KnowledgeBase:
         """Prefer selected-snapshot evidence; missing pages may supply dated history."""
         tr = _trace if _trace is not None else {}
         selected = self._snapshot_for(as_of)
-        message, negated = strip_negations(question)
+        message, negated = strip_negations(self._respell(question, selected))
         question = focus_question(message)
         # Words of the other sentences still describe the subject ("I'm looking at the 17-month certificate
         # special. What's its yield?"); they count, at a lower weight, but are never the required word.
@@ -725,7 +742,7 @@ class KnowledgeBase:
             own = set().union(*(vocab[f] for f in group)) if group else set()
             siblings = set().union(*(vocab[f] for f in by_family if CATEGORY.get(f, f) == CATEGORY.get(qfam, qfam)
                                      and f not in group)) - own
-            content = qtoks - GENERIC - WORDING - DEFAULT_TIER
+            content = qtoks - GENERIC - WORDING - DEFAULT_TIER - LIST_WORDS
             modifier = _modifier(canonical(question), qfam) or _modifier(canonical(message or question), qfam)
             tr.update(family=qfam, modifier=modifier, sibling_words=sorted(content & siblings))
             if not fam_rows or (modifier and modifier not in own) or content & siblings:
@@ -747,6 +764,15 @@ class KnowledgeBase:
                     return True
             return False
 
+        counted = None
+        m = COUNT_OF.search(question) if shape == "count" else None
+        if m and m.group(1).split():
+            noun = stem(re.sub(r"[^a-z]", "", m.group(1).split()[-1].lower()))
+            if noun and noun not in STOP:
+                counted = re.compile(r"\b" + NUMBER_WORD + r"\s+(?:[\w-]+\s+){0,2}" + re.escape(noun[:-1] if len(noun) > 4 else noun),
+                                     re.I)
+        tr["counted"] = counted.pattern if counted else None
+
         def search(pages):
             score = {}
             candidates = {pid for t in words for pid in index.get(t, ())}
@@ -760,6 +786,8 @@ class KnowledgeBase:
                     continue
                 if award_names and not award_supported(p.text):
                     continue
+                if counted and not counted.search(p.text):
+                    continue   # a passage with an address or a date in it is not a count of windows
                 title_toks = self.pages[p.page][0]
                 if anchor and anchor not in p.toks and anchor not in title_toks:
                     continue
@@ -842,9 +870,12 @@ class KnowledgeBase:
         sources = [Source(url=win.url, snapshot_id=sid, quote=win.text[:200])]
         if win.table >= 0:
             # Every matching row of the winning table, and only that table (D7).
-            row_ids = [pid for pid in sorted(cands)
+            # "List every certificate term": every row of the table that passed the checks, not only the
+            # rows scoring as high as the winner.
+            listing = fam_rows is not None and LIST_ASKED.search(question)
+            row_ids = [pid for pid in sorted(score if listing else cands)
                        if self.passages[pid].page == win.page and self.passages[pid].table == win.table
-                       and score[pid] >= score[win_id] - 1e-9][:12]
+                       and (listing or score[pid] >= score[win_id] - 1e-9)][:12]
             if fam_rows:
                 # A category question ("your credit cards") spans several tables and pages (personal and
                 # business cards): add the family's other rows that are as strong as the winner, from rate
@@ -982,6 +1013,54 @@ class KnowledgeBase:
         trace.update(winner=chosen[0][1], link_answer=True)
         return Answer(text="Published links:\n" + "\n".join(
             f"- {label}: {url}" for url, _, _, label in chosen), sources=sources)
+
+    def _respell(self, text, si):
+        """A word of the message the site never uses, five letters or longer, is read as the site's word it
+        is one typing slip from: two site words of 4+ letters run together ("hometart" -> home tart, for
+        Home$tart; "weekdays" stays), or one
+        letter dropped, added, changed or swapped ("mortage" -> mortgage), never the first letter ("finder"
+        is not "binder"). The most common candidate wins. Capitalised words (names), number words
+        ("three") and words the site uses are left alone."""
+        if si is None:
+            return text
+        cache = self.__dict__.setdefault("_respelled", {})
+
+        def fix(m):
+            word = m.group(0)
+            if (word[0].isupper() and m.start() > 0) or word.lower() in WORD_NUMBERS:
+                return word
+            key = (si, word.lower())
+            if key not in cache:
+                w = stem(word.lower())
+                got = self._spelled({w}, si) if w not in STOP else {w}
+                cache[key] = word if got == {w} else " ".join(sorted(got, key=lambda g: w.find(g[:3])))
+            return cache[key]
+        return re.sub(r"[A-Za-z]{5,}", fix, text)
+
+    def _spelled(self, words, si):
+        index = self.index[si]
+        out = set()
+        for w in sorted(words):
+            if w in index or len(w) < 5:
+                out.add(w)
+                continue
+            splits = [(min(len(index[w[:i]]), len(index[w[i:]])), w[:i], w[i:]) for i in range(4, len(w) - 3)
+                      if w[:i] in index and w[i:] in index]
+            if splits:
+                _, a, b = max(splits)
+                out.update((a, b))
+                continue
+            letters = "abcdefghijklmnopqrstuvwxyz"
+            parts = [(w[:i], w[i:]) for i in range(len(w) + 1)]
+            edits = ({a + b[1:] for a, b in parts if b} | {a + b[1] + b[0] + b[2:] for a, b in parts if len(b) > 1}
+                     | {a + c + b[1:] for a, b in parts if b for c in letters} | {a + c + b for a, b in parts for c in letters})
+            edits = {e for e in edits if e[:1] == w[:1]}   # slips rarely hit the first letter: "finder" stays
+            # Only toward a word the site uses often (in 10+ passages): a typo of the site's own terms, not
+            # a rare real word ("finder" is not "fender").
+            known = [(len(index[e]), e) for e in edits if e in index and e not in STOP and len(index[e]) >= 10]
+            common = sorted(e for e in edits if e in STOP)      # "curent" -> current, a word the index skips
+            out.add(max(known)[1] if known else common[0] if common else w)
+        return out
 
     def _lone_words(self, qtoks, si, message):
         """Question words the site never uses in one passage together with another content word of the
@@ -1207,7 +1286,7 @@ class KnowledgeBase:
         matches = []
         for (topic, program), seen in observations.items():
             if not program:
-                if not branch or words - GENERIC - tokens("count total operate operates operating"):
+                if not branch or words - GENERIC - tokens("count total operate operates operating office offices"):
                     continue  # No state, branch, employee or other-scope substitutions.
             else:
                 awarder = tokens(topic.split()[1])
@@ -1453,7 +1532,8 @@ def _modifier(question: str, family: str) -> str:
                 return ""
             before = re.findall(r"[a-z]+", question[:m.start()].lower())
             w = stem(before[-1]) if before else ""
-            return "" if not w or w in STOP or w in GENERIC or w in WORDING or w in DEFAULT_TIER or len(w) < 2 else w
+            return "" if (not w or w in STOP or w in GENERIC or w in WORDING or w in DEFAULT_TIER or w in LIST_WORDS
+                          or len(w) < 2) else w
     return ""
 
 

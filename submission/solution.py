@@ -120,8 +120,8 @@ def focus_question(question: str) -> str:
     "My spouse and I were chatting about this. What is the routing number? Thanks!" asks only the middle
     sentence: when a message has several sentences and some end with "?", those are the question, and a
     lead-in before a colon or ", but" ("Quick question before I head out: What is...?") is dropped too.
-    The other sentences keep only their names ("I'm stopping at the Peosta branch. What's its address?"
-    still needs Peosta). A question too short to name its subject ("... How?") keeps the whole message.
+    Names from the other sentences are appended ("I'm stopping at the Peosta branch. What's its address?"
+    still needs Peosta); answer() also counts their other words, at CONTEXT_WEIGHT. A question too short to name its subject ("... How?") keeps the whole message.
     Initials ("J.D. Power") and times ("9 a.m. Saturday") don't end a sentence. Numbers are read from the whole message by question_numbers()."""
     sentences = [x.strip() for x in SENTENCE_END.split(question.strip()) if x.strip()]
     asked = [x for x in sentences if x.endswith("?")]
@@ -136,6 +136,29 @@ def focus_question(question: str) -> str:
     if core == question.strip():
         return question
     return core + (" (" + ", ".join(names) + ")" if names else "")
+
+
+NEGATED = re.compile(r"\b(?:non-|not\s+(?:the\s+|a\s+|an\s+)?|rather\s+than\s+(?:the\s+|a\s+|an\s+)?|"
+                     r"instead\s+of\s+(?:the\s+|a\s+|an\s+)?|other\s+than\s+(?:the\s+|a\s+|an\s+)?|"
+                     r"excluding\s+(?:the\s+)?|except\s+(?:for\s+)?(?:the\s+)?)"
+                     r"((?:(?:regular|standard|basic|normal|usual|plain)\s+)?[A-Za-z$]+)", re.I)
+
+
+def strip_negations(question: str):
+    """("the 17-month special, the regular one rather than jumbo" -> text without "rather than jumbo",
+    {"jumbo"}). A word the member rules out ("non-jumbo", "not the regular Share account", "instead of
+    a Money Market") is not a word they ask about: it is removed from the question, and a rate row that
+    has it is not an answer. One word is ruled out, two after "regular"/"standard"; a generic word
+    ("not open", "not available") leaves the question unchanged."""
+    negated = set()
+
+    def drop(m):
+        words = tokens(m.group(1)) - GENERIC
+        if not words:
+            return m.group(0)   # "not open", "not available": a statement about the subject, kept as is
+        negated.update(words)
+        return " "
+    return NEGATED.sub(drop, question), frozenset(negated)
 
 
 def tokens(text: str) -> set[str]:
@@ -227,6 +250,9 @@ location loan account saving member number link url website page dupaco credit u
 # a member says but the site doesn't ("..., roughly speaking, in plain terms?"); 0.4 keeps every
 # must-refuse question refused (the specific word and the family checks do that work, not coverage).
 COV_MIN = 0.4
+# Weight of words from the message's other sentences ("I'm looking at the 17-month special. What's its
+# APY?"). Swept 0.5 / 0.3 / 0.2 on the padded and two-sentence dev sets: 0.2 best, public unchanged.
+CONTEXT_WEIGHT = 0.2
 
 
 # The question's rarest word may be a word of the message, not of the subject ("wondering", "asking"): the
@@ -547,9 +573,13 @@ class KnowledgeBase:
         """Prefer selected-snapshot evidence; missing pages may supply dated history."""
         tr = _trace if _trace is not None else {}
         selected = self._snapshot_for(as_of)
-        message, question = question, focus_question(question)
-        tr["focus"] = question
-        ans = self._answer_snapshot(question, selected, tr, message)
+        message, negated = strip_negations(question)
+        question = focus_question(message)
+        # Words of the other sentences still describe the subject ("I'm looking at the 17-month certificate
+        # special. What's its yield?"); they count, at a lower weight, but are never the required word.
+        context = frozenset(tokens(message) - tokens(question))
+        tr.update(focus=question, context=sorted(context), negated=sorted(negated))
+        ans = self._answer_snapshot(question, selected, tr, message, context, negated)
         if ans.confident and not as_of:
             ans.text = ans.text.replace(f"(as of {self.snaps[selected][1]}):", "(currently):", 1)
         if ans.confident or selected is None:
@@ -573,7 +603,7 @@ class KnowledgeBase:
         for old in sorted((i for i, (_, d) in enumerate(self.snaps) if d < limit),
                           key=lambda i: self.snaps[i][1], reverse=True):
             past_trace = {}
-            past = self._answer_snapshot(question, old, past_trace, message)
+            past = self._answer_snapshot(question, old, past_trace, message, context, negated)
             if not past.confident:
                 continue
             win = self.passages[past_trace["winner"]]
@@ -608,21 +638,25 @@ class KnowledgeBase:
             cache[si] = {p.url for p in self._snap_passages(si)}
         return cache[si]
 
-    def _answer_snapshot(self, question: str, si, _trace=None, message=None) -> Answer:
+    def _answer_snapshot(self, question: str, si, _trace=None, message=None, context=frozenset(),
+                         negated=frozenset()) -> Answer:
         """_trace: optional dict filled with every stage's intermediate results (dev/trace_refusals.py)."""
         tr = _trace if _trace is not None else {}
         tr["snap"] = si
         if si is None:
             return Answer(text=REFUSAL, confident=False)
-        qtoks = tokens(question) - ANSWER_KIND
+        qtoks = tokens(question) - ANSWER_KIND - negated
         qnums = question_numbers(message or question)   # "I'm buying a 2025 car. What APR...?"
         shape = answer_shape(question)
         tr.update(qtoks=qtoks, qnums=qnums, shape=shape)
         if not qtoks:
             return Answer(text=REFUSAL, confident=False)
-        lone = self._lone_words(qtoks, si, message or question)
+        ctx = set(context) - qtoks - ANSWER_KIND - negated
+        lone = self._lone_words(qtoks | ctx, si, message or question)
         tr["lone"] = sorted(lone)
-        qtoks = qtoks - lone
+        qtoks, ctx = (qtoks - lone) or qtoks, ctx - lone
+        words = qtoks | ctx                       # every word that counts toward coverage and score
+        weight = {t: (1.0 if t in qtoks else CONTEXT_WEIGHT) for t in words}
         compared = self._schedule_comparison(question, si, tr)
         if compared is not None:
             return compared
@@ -639,10 +673,10 @@ class KnowledgeBase:
         # the right shape (times for an hours question, a % on a rate page for a rate question...).
         pindex = self.page_index[si]
         n_pages = max(1, len({pg for ids in pindex.values() for pg in ids}))
-        pidf = {t: math.log(1 + n_pages / (1 + len(pindex.get(t, ())))) for t in sorted(qtoks)}
+        pidf = {t: weight[t] * math.log(1 + n_pages / (1 + len(pindex.get(t, ())))) for t in sorted(words)}
         ptotal = sum(pidf.values()) or 1.0
         pcov = defaultdict(float)
-        for t in sorted(qtoks):
+        for t in sorted(words):
             for pg in pindex.get(t, ()):
                 if shape in self.pages[pg][2]:
                     pcov[pg] += pidf[t] / ptotal
@@ -651,7 +685,7 @@ class KnowledgeBase:
         if shape == "rate":
             # A rate question naming a product family the site publishes rates for: the family check below
             # decides which rows answer, so other words of the question can't make every page fall short.
-            fam = _family_of(canonical(question))
+            fam = _family_of(canonical(question)) or _family_of(canonical(message or question))
             by_family = self._family_index()[si][0] if fam else {}
             fam_pages = {self.passages[pid].page for f in by_family if f == fam or CATEGORY.get(f) == fam
                          for pid in by_family[f]}
@@ -664,7 +698,7 @@ class KnowledgeBase:
 
         # Stage B: passages on those pages. Their own words count fully, the page title at half (Q4).
         index, n = self.index[si], max(1, self.n_passages[si])
-        idf = {t: math.log(1 + n / (1 + len(index.get(t, ())))) for t in sorted(qtoks)}
+        idf = {t: weight[t] * math.log(1 + n / (1 + len(index.get(t, ())))) for t in sorted(words)}
         total = sum(idf.values()) or 1.0
         # D9: the question's most specific word (rarest non-generic word the site uses at all, e.g.
         # "construction", "Mullan") must be in the passage or its page title. Otherwise it's a near miss.
@@ -679,7 +713,7 @@ class KnowledgeBase:
         # a modifier or feature that only a sibling product has ("introductory" on the Rewards Visa), or
         # that no row of the family has ("reverse", "interest-only" mortgage, "Unicorn" Savings), refuses.
         fam_rows, required = None, set()
-        qfam = _family_of(canonical(question)) if shape == "rate" else ""
+        qfam = (_family_of(canonical(question)) or _family_of(canonical(message or question))) if shape == "rate" else ""
         tr["family"] = qfam
         if shape == "rate" and not qfam:
             # A rate for a product the site has no rate family for (construction, payday, student loans).
@@ -692,7 +726,7 @@ class KnowledgeBase:
             siblings = set().union(*(vocab[f] for f in by_family if CATEGORY.get(f, f) == CATEGORY.get(qfam, qfam)
                                      and f not in group)) - own
             content = qtoks - GENERIC - WORDING - DEFAULT_TIER
-            modifier = _modifier(canonical(question), qfam)
+            modifier = _modifier(canonical(question), qfam) or _modifier(canonical(message or question), qfam)
             tr.update(family=qfam, modifier=modifier, sibling_words=sorted(content & siblings))
             if not fam_rows or (modifier and modifier not in own) or content & siblings:
                 return Answer(text=REFUSAL, confident=False)
@@ -715,8 +749,8 @@ class KnowledgeBase:
 
         def search(pages):
             score = {}
-            candidates = {pid for t in qtoks for pid in index.get(t, ())}
-            title_pages = {pg for pg in pages if qtoks & self.pages[pg][0]}
+            candidates = {pid for t in words for pid in index.get(t, ())}
+            title_pages = {pg for pg in pages if words & self.pages[pg][0]}
             candidates.update(pid for pid, p in enumerate(self.passages) if p.page in title_pages)
             for pid in sorted(candidates):
                 p = self.passages[pid]
@@ -729,10 +763,11 @@ class KnowledgeBase:
                 title_toks = self.pages[p.page][0]
                 if anchor and anchor not in p.toks and anchor not in title_toks:
                     continue
-                if fam_rows is not None and (pid not in fam_rows or not required <= p.toks | title_toks):
+                if fam_rows is not None and (pid not in fam_rows or not required <= p.toks | title_toks
+                                             or negated & p.toks):   # "non-jumbo": not the jumbo rows
                     continue
-                own = sum(idf[x] for x in sorted(qtoks & p.toks))
-                from_title = sum(idf[x] for x in sorted((qtoks & title_toks) - p.toks))
+                own = sum(idf[x] for x in sorted(words & p.toks))
+                from_title = sum(idf[x] for x in sorted((words & title_toks) - p.toks))
                 score[pid] = (own + 0.5 * from_title) / total
             best = max(score.values(), default=0.0)
             # A family's rows are already the product asked about, so filler words lowering every row's
@@ -784,7 +819,7 @@ class KnowledgeBase:
             # A rate row from the segment the member didn't ask for (business, unless the question says
             # business) only wins when nothing from their own segment does.
             p = self.passages[pid]
-            about = round(sum(idf[w] for w in sorted((qtoks - GENERIC) & self.pages[p.page][0])) / total, 2)
+            about = round(sum(idf[w] for w in sorted((words - GENERIC) & self.pages[p.page][0])) / total, 2)
             newest_first = (_neg(p.date) if p.date else "~") if p.kind == "article" else ""
             return (KIND_RANK[p.kind], other_segment(pid), -about, newest_first, -round(score[pid], 2), p.url, pid)
 

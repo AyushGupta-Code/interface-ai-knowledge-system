@@ -227,6 +227,7 @@ location loan account saving member number link url website page dupaco credit u
 # a member says but the site doesn't ("..., roughly speaking, in plain terms?"); 0.4 keeps every
 # must-refuse question refused (the specific word and the family checks do that work, not coverage).
 COV_MIN = 0.4
+
 # When the question's rarest word empties the candidates, it may be a word of the message, not of the
 # subject ("wondering", "asking"): try the next-rarest word, at most twice. A name the member capitalised
 # ("Mullan", "Chicago") is never dropped, so a branch the site has no hours for still refuses.
@@ -646,6 +647,17 @@ class KnowledgeBase:
                     pcov[pg] += pidf[t] / ptotal
         best_page = max(pcov.values(), default=0.0)
         tr.update(pcov=dict(pcov), best_page=best_page)
+        if shape == "rate":
+            # A rate question naming a product family the site publishes rates for: the family check below
+            # decides which rows answer, so other words of the question can't make every page fall short.
+            fam = _family_of(canonical(question))
+            by_family = self._family_index()[si][0] if fam else {}
+            fam_pages = {self.passages[pid].page for f in by_family if f == fam or CATEGORY.get(f) == fam
+                         for pid in by_family[f]}
+            if fam_pages:
+                best_page = max(best_page, COV_MIN)
+                for pg in fam_pages:
+                    pcov[pg] = max(pcov.get(pg, 0.0), best_page)
         if best_page < COV_MIN:
             return self._support_channel(question, si, tr) or Answer(text=REFUSAL, confident=False)
 
@@ -722,7 +734,9 @@ class KnowledgeBase:
                 from_title = sum(idf[x] for x in sorted((qtoks & title_toks) - p.toks))
                 score[pid] = (own + 0.5 * from_title) / total
             best = max(score.values(), default=0.0)
-            cutoff = max(0.35, best - 0.15)
+            # A family's rows are already the product asked about, so filler words lowering every row's
+            # score must not push them under the 0.35 floor that guards free-text questions.
+            cutoff = best - 0.15 if fam_rows is not None else max(0.35, best - 0.15)
             return score, cutoff, [pid for pid, sc in score.items() if sc >= cutoff]
 
         # The best-covered pages first; if none of them holds a passing passage, every page that still

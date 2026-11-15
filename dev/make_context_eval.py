@@ -26,12 +26,22 @@ QUESTIONS = [
     ("dup-035", "neg1", "What's the standard purchase APR on the Platinum Visa rather than the Rewards Visa?"),
     ("dup-046", "neg1", "Not the money market, just Share Savings: what's the highest APY?"),
     ("dup-045", "neg1", "What dividend rate does Share Savings earn between $10,000 and $24,999, instead of the money market?"),
+    # Tier fix (after the third sealed set): other ways of ruling out, and "regular"/"standard" vs jumbo.
+    ("dup-001", "neg3", "Give me the 17-month special certificate APY, leaving out the jumbo version."),
+    ("dup-001", "neg4", "What's the APY on the 17-month certificate special without the jumbo minimum?"),
+    ("dup-001", "reg1", "What APY does the regular 17-month certificate special pay?"),
+    ("dup-001", "reg2", "standard 17 month special cd apy"),
 ]
+# The jumbo special's APY must not appear when the member asked for the regular one.
+NOT_JUMBO = {"neg1", "neg2", "neg3", "neg4", "reg1", "reg2"}
 
 
 def main():
     items = {json.loads(l)["id"]: json.loads(l) for l in (ROOT / "eval/public_eval.jsonl").read_text().splitlines() if l.strip()}
     out = [dict(items[src], id=f"{src}-{tag}", question=q, group=None) for src, tag, q in QUESTIONS]
+    for o in out:
+        if o["id"].startswith("dup-001-") and o["id"].rsplit("-", 1)[1] in NOT_JUMBO:
+            o["must_not_include"] = ["4.20%"]
     (ROOT / "dev/context_eval.jsonl").write_text("".join(json.dumps(o) + "\n" for o in out))
     print(len(out), "questions")
 

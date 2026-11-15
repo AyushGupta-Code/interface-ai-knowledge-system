@@ -140,14 +140,21 @@ def focus_question(question: str) -> str:
 
 NEGATED = re.compile(r"\b(?:non-|not\s+(?:the\s+|a\s+|an\s+)?|rather\s+than\s+(?:the\s+|a\s+|an\s+)?|"
                      r"instead\s+of\s+(?:the\s+|a\s+|an\s+)?|other\s+than\s+(?:the\s+|a\s+|an\s+)?|"
-                     r"excluding\s+(?:the\s+)?|except\s+(?:for\s+)?(?:the\s+)?)"
+                     r"excluding\s+(?:the\s+)?|except\s+(?:for\s+)?(?:the\s+)?|leaving\s+out\s+(?:the\s+)?|"
+                     r"without\s+(?:the\s+|a\s+|an\s+)?|skip(?:ping)?\s+(?:the\s+)?)"
                      r"((?:(?:regular|standard|basic|normal|usual|plain)\s+)?[A-Za-z$]+)", re.I)
+
+
+# "the regular / standard 17-month special" is the one that isn't jumbo: a jumbo row is another tier of the
+# same product, and giving its value next to the regular one is a wrong-tier answer.
+REGULAR_TIER = re.compile(r"\b(?:regular|standard|normal|non-?jumbo)\b", re.I)
+BIG_TIER = frozenset({"jumbo"})
 
 
 def strip_negations(question: str):
     """("the 17-month special, the regular one rather than jumbo" -> text without "rather than jumbo",
     {"jumbo"}). A word the member rules out ("non-jumbo", "not the regular Share account", "instead of
-    a Money Market") is not a word they ask about: it is removed from the question, and a rate row that
+    a Money Market", "leaving out the jumbo", "without the jumbo minimum") is not a word they ask about: it is removed from the question, and a rate row that
     has it is not an answer. One word is ruled out, two after "regular"/"standard"; a generic word
     ("not open", "not available") leaves the question unchanged."""
     negated = set()
@@ -662,6 +669,8 @@ class KnowledgeBase:
         tr["snap"] = si
         if si is None:
             return Answer(text=REFUSAL, confident=False)
+        if REGULAR_TIER.search(message or question) and not tokens(message or question) & BIG_TIER:
+            negated = negated | BIG_TIER   # "the regular 17-month special": not its jumbo version
         qtoks = tokens(question) - ANSWER_KIND - negated
         qnums = question_numbers(message or question)   # "I'm buying a 2025 car. What APR...?"
         shape = answer_shape(question)

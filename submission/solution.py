@@ -177,7 +177,7 @@ def answer_shape(question: str) -> str:
     if re.search(r"\bwhat date\b|\bstill (?:open|visit|go|use|bank)\b|\bopen (?:now|anymore)\b|\bclosing\b|\bshut down\b"
                  r"|\bwhen (?:does|will|did)\b.*\bclose", q) and not re.search(r"\binstead\b|\bwhich branch|\bwhere\b", q):
         return "date"
-    if re.search(r"\bhours?\b|what time|\bwhen\b.*\bopen\b", q):
+    if re.search(r"\bhours?\b|what time|\bwhen\b.*\bopen\b|\bwhen can (?:i|we) (?:visit|stop by|come (?:in|by))\b", q):
         return "hours"
     if re.search(r"\baddress\b|\bwhere is\b|\blocated\b", q):
         return "address"
@@ -258,6 +258,10 @@ ANSWER_KIND = set("link url website web page list site".split())
 COMPARE = re.compile(r"\b(?:same|identical|differ(?:ent|s)?|vary|varies|consistent|uniform)\b", re.I)
 HOURS_WORD = re.compile(r"\b(?:hours?|times?|schedules?|open(?:ing)?|clos(?:e|es|ing))\b", re.I)
 MANY_PLACES = re.compile(r"\b(?:branch(?:es)?|locations?|lobb(?:y|ies)|offices?|every|all|each)\b", re.I)
+# Words that leave an hours question general ("What are your usual lobby hours on Saturday?").
+GENERAL_HOURS = {stem(w) for w in """lobby lobbies driveup drive up thru through hour hours general typical usual
+    normal regular standard open opening close closing visit weekday weekdays weekend weekends monday tuesday wednesday thursday friday saturday
+    sunday""".split()}
 SERVICE_SCHEDULE = re.compile(r"\*\*(Lobby|Drive-up)\*\*\s*·?\s*(.+)", re.I)
 DIAL_CODE = re.compile(r"\+\d{1,4}\b")
 # "How do I change / update ... ?": a request for a procedure on the member's own account.
@@ -614,6 +618,9 @@ class KnowledgeBase:
         tr.update(qtoks=qtoks, qnums=qnums, shape=shape)
         if not qtoks:
             return Answer(text=REFUSAL, confident=False)
+        lone = self._lone_words(qtoks, si, message or question)
+        tr["lone"] = sorted(lone)
+        qtoks = qtoks - lone
         compared = self._schedule_comparison(question, si, tr)
         if compared is not None:
             return compared
@@ -908,6 +915,25 @@ class KnowledgeBase:
         return Answer(text="Published links:\n" + "\n".join(
             f"- {label}: {url}" for url, _, _, label in chosen), sources=sources)
 
+    def _lone_words(self, qtoks, si, message):
+        """Question words the site never uses in one passage together with another content word of the
+        question: the member's own words, not the subject ("the Galena branch, roughly speaking?"). Names the
+        member capitalised are kept. Words of one filler phrase still vouch for each other ("mind" and
+        "asking"), so this catches only isolated filler."""
+        index = self.index[si]
+        names = tokens(" ".join(NAME_WORD.findall(" " + message)))
+        content = sorted(t for t in qtoks if t not in GENERIC and t not in WORDING)
+        if len(content) < 2:
+            return set()
+        posting = {t: set(index.get(t, ())) for t in qtoks}
+        lone = set()
+        for t in content:
+            if t in names or not posting[t]:
+                continue
+            if not any(posting[t] & posting[u] for u in qtoks if u != t):
+                lone.add(t)
+        return lone if qtoks - lone else set()
+
     def _schedule_index(self, si):
         """service ('lobby' / 'drive-up') -> {schedule as written, normalised: newest pid stating it}.
         Branch schedules are published in dated branch announcements ("**Lobby** · Monday-Friday: ...")."""
@@ -929,16 +955,25 @@ class KnowledgeBase:
 
     def _schedule_comparison(self, question, si, trace):
         """"Are the lobby hours the same at every branch?": list each distinct published schedule, newest
-        first, with the announcement it comes from. Says they differ only when two or more differ."""
-        if not (COMPARE.search(question) and HOURS_WORD.search(question) and MANY_PLACES.search(question)):
-            return None
+        first, with the announcement it comes from. Says they differ only when two or more differ.
+        Also "What are your lobby hours?" when no branch is named: the site publishes hours per branch, so
+        the honest answer is the schedules it has published and a question about which branch."""
         service = "drive-up" if re.search(r"\bdrive\b|drive-?up|drive-?thr", question, re.I) else "lobby"
+        compare = COMPARE.search(question) and HOURS_WORD.search(question) and MANY_PLACES.search(question)
+        general = (answer_shape(question) == "hours" and re.search(r"\blobb(?:y|ies)\b|\bdrive", question, re.I)
+                   and not tokens(question) - GENERIC - GENERAL_HOURS)
+        if not (compare or general):
+            return None
         found = self._schedule_index(si).get(service, {})
         if len(found) < 2:
             return None
         pids = sorted(found.values(), key=lambda i: (_neg(self.passages[i].date or ""), self.passages[i].url))[:5]
-        lines = [f"No. Dupaco has published different {service} hours for different branches. These come from "
-                 f"branch announcements, newest first, so check your branch's current hours:"]
+        if compare:
+            lines = [f"No. Dupaco has published different {service} hours for different branches. These come from "
+                     f"branch announcements, newest first, so check your branch's current hours:"]
+        else:
+            lines = [f"{service.capitalize()} hours vary by branch. These are the {service} schedules Dupaco has "
+                     f"published in branch announcements, newest first. Which branch do you need?"]
         for pid in pids:
             p = self.passages[pid]
             sched = SERVICE_SCHEDULE.search(p.text).group(2).strip(" ·")

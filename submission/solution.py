@@ -946,7 +946,8 @@ class KnowledgeBase:
                 if p.kind not in ("rates", "product", "other"):
                     continue
                 for label, href in re.findall(r"\[([^\[\]]+)\]\(([^\s)]+)\)", p.text):
-                    destination = urljoin(p.url, href)
+                    # An empty fragment ("…/savings-account#") is kept by urljoin on Python 3.14 but not 3.11.
+                    destination = urljoin(p.url, href).rstrip("#")
                     if urlparse(destination).scheme not in ("http", "https"):
                         continue
                     context = label + " " + p.context

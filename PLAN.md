@@ -372,3 +372,12 @@ Diagnosis only (`python3 dev/trace_refusals.py --all --eval dev/untouched3_eval.
 - **Recognised article count with extra words** ("in the latest published count"), and "hometart … max grant" finds the article but not the $15,000 sentence.
 - **One must-refuse answered** with an unrelated article.
 The set is now spent.
+
+## Tier fix (2026-11-15), from the third sealed set's two stale values
+
+`2c9a3d5`. Added 4 items to `dev/context_eval.jsonl` (now 19), each with the jumbo special's APY (4.20%) as must_not_include: "leaving out the jumbo version", "without the jumbo minimum", "the regular 17-month certificate special", "standard 17 month special cd apy". Before: all four gave the jumbo row next to the regular one (stale-trap hit). After: all four correct.
+
+- More ways of ruling out: "leaving out (the)", "without (the/a)", "skip(ping) (the)". A generic word after them leaves the question unchanged ("without a fee").
+- "regular", "standard", "normal", "non-jumbo", when the message doesn't also say jumbo, rule out the jumbo rows: a jumbo row is another tier of the same product.
+
+Checks: context 0.7842 → 0.9947; no public, reworded, must-refuse, chatty, inline or shape item changed; practice 1.0; conflicts F1 0.759, 0/8 negatives; 0 stale traps; gates 36/36, `--sixth` 41/41, `--determinism` 37/37.

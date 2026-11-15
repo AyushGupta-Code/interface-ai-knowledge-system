@@ -228,8 +228,9 @@ location loan account saving member number link url website page dupaco credit u
 # must-refuse question refused (the specific word and the family checks do that work, not coverage).
 COV_MIN = 0.4
 
-# When the question's rarest word empties the candidates, it may be a word of the message, not of the
-# subject ("wondering", "asking"): try the next-rarest word, at most twice. A name the member capitalised
+
+# The question's rarest word may be a word of the message, not of the subject ("wondering", "asking"): the
+# next ANCHOR_RETRIES rarest words are also tried as the required word. A name the member capitalised
 # ("Mullan", "Chicago") is never dropped, so a branch the site has no hours for still refuses.
 ANCHOR_RETRIES = 2
 BUNDLE_MARGIN = 0.15   # same margin as the candidate cutoff: passages this close are equally good evidence
@@ -742,18 +743,36 @@ class KnowledgeBase:
         # The best-covered pages first; if none of them holds a passing passage, every page that still
         # covers half the question (a refusal only when nothing on the site passes the checks).
         names = tokens(" ".join(NAME_WORD.findall(" " + (message or question))))
-        tried = 0
-        while True:
+        def run():
             pages = {pg for pg, c in pcov.items() if c >= 0.75 * best_page}
             score, cutoff, cands = search(pages)
             if not cands:
                 pages = {pg for pg, c in pcov.items() if c >= COV_MIN}
                 score, cutoff, cands = search(pages)
-            if cands or anchor is None or anchor in names or tried >= ANCHOR_RETRIES:
-                break
-            tried += 1
-            anchor = specific[tried] if tried < len(specific) else None
-            tr.setdefault("dropped_anchor", []).append(specific[tried - 1])
+            return pages, score, cutoff, cands
+
+        if anchor is not None and anchor not in names and fam_rows is None:
+            # The rarest word may be the member's, not the subject's ("..., if you don't mind me asking?"):
+            # try it and the next two rarest as the required word, and keep the one that finds the
+            # strongest passage. A capitalised name ends the list, so it is always tried.
+            options = []
+            for k, a in enumerate(specific[:ANCHOR_RETRIES + 1]):
+                anchor = a
+                res = run()
+                options.append((-max((res[1][c] for c in res[3]), default=-1.0), k, a, res))
+                if a in names:
+                    break
+            _, _, anchor, (pages, score, cutoff, cands) = min(options, key=lambda o: o[:2])
+            tr["anchor_options"] = [(a, -b) for b, _, a, _ in options]
+        else:
+            tried = 0
+            while True:
+                pages, score, cutoff, cands = run()
+                if cands or anchor is None or anchor in names or tried >= ANCHOR_RETRIES:
+                    break
+                tried += 1
+                anchor = specific[tried] if tried < len(specific) else None
+                tr.setdefault("dropped_anchor", []).append(specific[tried - 1])
         tr.update(pages=pages, score=score, cutoff=cutoff, cands=cands)
         if not cands:
             return self._support_channel(question, si, tr) or Answer(text=REFUSAL, confident=False)

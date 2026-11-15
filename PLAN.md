@@ -289,3 +289,21 @@ Each step: no public, reworded or must-refuse item changed; practice 1.0; confli
 **Rejected:** dropping question words absent from the 5–20 best-covered pages (chatty only 0.32 → 0.38; dropped "Mullan" and broke ref-04, ref-12, dup-102); restricting the specific word to words on the best-covered pages (public 0.8822 → 0.8512, must-refuse 18 → 16, fixed nothing); separating filler from subject words by page titles or headings (no clean split: "routing", "lobby", "Mullan" are absent from titles while "profile", "asking", "household" are in blog headings).
 
 **Not fixed:** filler inside the question sentence still costs inline 0.27 against public. The specific word is still often a filler word ("asking", "wondering") when other candidates survive, and passage scores are diluted by filler. Separating subject words from conversational words reliably needs a language model or word embeddings, which D1 and Q6 rule out for this submission.
+
+## Further refinement (2026-11-15, same day)
+
+Same method: every step checked with `dev/run_build_checks.py`, `check_finishing_gates.py` (36/36, `--sixth` 41/41, `--determinism` 37/37) and the two padded development sets; 0 stale traps and 0 errors throughout; p95 ≤ 0.26 s.
+
+| Step | Commit | Public | Reworded | Must-refuse | Chatty | Inline |
+|---|---|---|---|---|---|---|
+| Before | `b50a098` | 0.8822 | 0.8361 | 18/18 | 0.8434 | 0.6155 |
+| General hours list schedules; isolated words dropped | `2752433` | **0.8868** | **0.854** | 18/18 | 0.8636 | 0.631 |
+| Rate families always searched, relative cutoff | `1c70409` | 0.8868 | 0.854 | 18/18 | **0.8868** | **0.755** |
+| Best of the three rarest words as required word | `3889133` | 0.8868 | **0.8675** | 18/18 | 0.8868 | **0.7783** |
+
+- **General hours.** "What are your lobby hours?" with no branch named now gets the published schedules (newest first) and "Which branch do you need?", as the answer key's expected answer asks ("give a typical schedule and ask which branch"). Same mechanism as the comparison answer. "When can I visit…" reads as an hours question. dup-066 and its rewordings gain the source credit (0.85 → 1), dup-065-p2 0 → 1.
+- **Isolated words.** A question word the site never uses in one passage with any other question word is dropped from matching (names kept). Words of one filler phrase still vouch for each other, so the effect is small; no public, reworded or must-refuse answer changed.
+- **Rate families.** When a rate question names a family the site publishes rates for, its pages are always searched and only the relative cutoff (best − 0.15) applies to its rows, not the 0.35 floor. The family check is what makes such an answer correct; padding was lowering every row's score. Swept separately: pages only 0.631 inline, cutoff only 0.7085, both 0.755. No public, reworded or must-refuse answer text changed.
+- **Required word.** Try each of the three rarest question words as the required word and keep the one whose best passage scores highest (a capitalised name is always tried; rate families keep their own check). Fixes dup-101-p2 (student loans); every changed answer is more on-topic.
+
+**Rejected:** ordering the required word as names, then page-title words, then the rest (public 0.8868 → 0.8558: "Mullan Avenue" made "avenue" a name and broke the Mullan refusals).

@@ -217,6 +217,10 @@ WORDING = set("between highest lowest top best list".split())
 # Words naming the kind of answer wanted (a link, a page). They are read by answer_shape(), and are not
 # topic words: counting them diluted page coverage ("link to the location finder").
 ANSWER_KIND = set("link url website web page list site".split())
+# Awards from organisations written with initials ("J.D. Power"): see _answer_snapshot.
+AWARD_ASKED = re.compile(r"\b(?:awards?|award-winning|recogni[sz](?:ed|ing|tion)|ranked|prizes?|winner|won|win)\b", re.I)
+DOTTED_NAME = re.compile(r"\b(?:[A-Z]\.\s*){2,}[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*")
+AWARD_GIVEN = re.compile(r"\b(?:won|received|awarded|recogni[sz]ed|honou?red|named|ranked|winner)\b", re.I)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -616,6 +620,20 @@ class KnowledgeBase:
             required, anchor = content & own, None
             tr.update(anchor=sorted(required))
 
+        # An award from a named organisation written with initials ("J.D. Power"): the tokenizer keeps
+        # only "power", so a passage about "the power of education" would answer. Such a question needs
+        # a sentence that names the organisation and says it gave an award.
+        award_names = (DOTTED_NAME.findall(question) if AWARD_ASKED.search(question) else [])
+        tr["award_names"] = award_names
+
+        def award_supported(text):
+            for sentence in re.split(r"(?<=[!?])\s+|(?<=[a-z])\.\s+", text):
+                letters = " ".join(re.findall(r"[a-z]+", sentence.lower()))
+                if (all(" ".join(re.findall(r"[a-z]+", n.lower())) in letters for n in award_names)
+                        and AWARD_GIVEN.search(sentence)):
+                    return True
+            return False
+
         def search(pages):
             score = {}
             candidates = {pid for t in qtoks for pid in index.get(t, ())}
@@ -626,6 +644,8 @@ class KnowledgeBase:
                 if pid in score or p.page not in pages:
                     continue
                 if not (shape in p.shapes and numbers_ok(qnums, p.text)):
+                    continue
+                if award_names and not award_supported(p.text):
                     continue
                 title_toks = self.pages[p.page][0]
                 if anchor and anchor not in p.toks and anchor not in title_toks:

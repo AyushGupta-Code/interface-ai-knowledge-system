@@ -269,3 +269,23 @@ Seal: `sha256sum dev/untouched_eval.jsonl` → `d277a765cc3bdf13427f5b963254b80f
 **Result of the one run** (`python3 harness/run_eval.py --submission submission --eval dev/untouched_eval.jsonl --out results/untouched`): final **0.3857**, accuracy 0.3974, paraphrase consistency 0.67, repeat consistency 1.0, p95 0.02 s, 0 stale traps, 0 errors. By category: should_refuse 1.00, tier 0.64, temporal 0.50, list 0.29, branch 0.25, conflict 0.25, entity 0.21, current_value 0.04, stale_trap 0.00 (all four refused, none answered stale). 20 of the 32 answerable questions were refused.
 
 Diagnosis only (`python3 dev/trace_refusals.py --eval dev/untouched_eval.jsonl`), no code changed: the refusals come from conversational wording. In 11 of 20 the specific-word rule (D9) picked a filler word the site doesn't use near the answer ("stopping", "arrived", "digit", "profile", "counting", "spell", "mentioned", "published", "shown", "combination", "waiver"); most of the rest fail page coverage because filler words ("navigate", "rely", "budgeting", "spreading") dilute it; one reads "closing bill" as a date question. This is the weakness REFUSAL_TRACE.md found in step 2; the earlier fixes removed the filler words seen in our own sets, not the mechanism. The set is now spent: any fix made after reading these results is tuned to it, and would need a new untouched set to measure.
+
+## Chatty-question fixes (2026-11-15), after the untouched result
+
+The untouched result showed conversational wording as the main weakness. To fix the mechanism without tuning to that spent set, two development sets made mechanically from the public questions (same answer keys, only padding added; `python3 dev/make_chatty_eval.py`): `dev/chatty_eval.jsonl` (80: a sentence before or after the question, e.g. "My spouse and I were chatting about this over dinner. … Thanks so much!") and `dev/inline_eval.jsonl` (40: padding inside the question sentence, e.g. "…, roughly speaking, in plain terms?"). Both are tuned against, not holdouts.
+
+| Step | Commit | Public | Reworded | Must-refuse | Chatty | Inline |
+|---|---|---|---|---|---|---|
+| Before | `4e81b2a` | 0.8822 | 0.8361 | 18/18 | 0.3215 | 0.5039 |
+| Read the asked sentence | `3260f07` | 0.8822 | 0.8361 | 18/18 | **0.8434** | 0.5039 |
+| Coverage 0.4, specific-word retries | `b50a098` | 0.8822 | 0.8361 | 18/18 | 0.8434 | **0.6155** |
+
+Each step: no public, reworded or must-refuse item changed; practice 1.0; conflicts F1 0.759 / 0/8 negatives; 0 stale traps; `check_finishing_gates.py` 36/36, `--sixth` 41/41, `--determinism` 37/37; p95 ≤ 0.24 s.
+
+- **Read the asked sentence** (`focus_question`). In a message of several sentences where some end with "?", only those are the question; a lead-in before a colon or ", but" is dropped. The other sentences keep only their capitalised names ("I'm stopping at the Peosta branch. What's its address?" keeps Peosta), and qualifier numbers are read from the whole message. Initials ("J.D.") and "a.m."/"p.m." don't end a sentence; a question with no content word of its own ("… How?") keeps the whole message. First version split "J.D. Power" and broke ref-14, and read "How?" alone and broke dup-060-p2; both fixed before commit.
+- **Coverage 0.5 → 0.4.** Swept 0.5 / 0.4 / 0.3: inline 0.50 → 0.60 at 0.4, identical at 0.3, nothing else changed. Must-refuse questions are refused by the specific word and the family checks, not by coverage.
+- **Specific-word retries (2).** When the rarest word empties the candidates, try the next-rarest, at most twice; a capitalised name is never dropped. Swept 0 / 1 / 2: inline 0.60 / 0.60 / 0.6155.
+
+**Rejected:** dropping question words absent from the 5–20 best-covered pages (chatty only 0.32 → 0.38; dropped "Mullan" and broke ref-04, ref-12, dup-102); restricting the specific word to words on the best-covered pages (public 0.8822 → 0.8512, must-refuse 18 → 16, fixed nothing); separating filler from subject words by page titles or headings (no clean split: "routing", "lobby", "Mullan" are absent from titles while "profile", "asking", "household" are in blog headings).
+
+**Not fixed:** filler inside the question sentence still costs inline 0.27 against public. The specific word is still often a filler word ("asking", "wondering") when other candidates survive, and passage scores are diluted by filler. Separating subject words from conversational words reliably needs a language model or word embeddings, which D1 and Q6 rule out for this submission.

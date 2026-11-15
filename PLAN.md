@@ -361,3 +361,14 @@ Written after sealing the third untouched set (its questions unread). New develo
 - **Counts.** "How many X does … have?": a passage answers only if it states a number of X ("22 branches", "two windows"); "How many ATMs does the Galena branch have?" now refuses instead of giving the address. "branch offices" counts as the branch count.
 
 Checks: no public, reworded, must-refuse, chatty or two-sentence item changed; practice 1.0; conflicts F1 0.759, 0/8 negatives; 0 stale traps; gates 36/36, `--sixth` 41/41, `--determinism` 37/37; p95 0.32 s. Left failing in the dev set: "hometart grant how much can i get" finds the right article but not its $15,000 sentence.
+
+**Result of the third sealed set's one run** (`python3 harness/run_eval.py --submission submission --eval dev/untouched3_eval.jsonl --out results/untouched3`, solution commit `42afaf8`, hash checked): final **0.657** (set 2 at `3889133`: 0.6162; set 1 at `ad7587f`: 0.3857), accuracy 0.6873, paraphrase consistency 0.5, repeat 1.0, p95 0.09 s, 0 errors, **2 stale-trap hits**. By category: entity 1.00, stale_trap 1.00, tier 0.79, should_refuse 0.75, list 0.68, conflict 0.54, current_value 0.54, temporal 0.54, branch 0.25. By style: conversational 0.77 (set 2: 0.36), plain 0.73, messy 0.64, vocabulary 0.52; public rewordings 0.73, new facts 0.58. 4 of 32 answerable questions refused.
+
+Diagnosis only (`python3 dev/trace_refusals.py --all --eval dev/untouched3_eval.jsonl`), no code changed:
+- **Both stale-trap hits are the jumbo row next to the regular one.** "…leaving out the jumbo" is not a negation the rule knows; "the regular 17 month special cd" as of June lists both rows because "regular" doesn't rule out the jumbo variant.
+- **Required word still a filler or answer word** (5): "street", "finish", "selection", "count", "charter" (the passage says "charter area" in a link the passage text lacks).
+- **Coverage** (2): "What address should I put into my navigation app?", a historical jumbo question.
+- **Two-part question with a count** ("fee per overdraft, and after how many days…") read as a count question.
+- **Recognised article count with extra words** ("in the latest published count"), and "hometart … max grant" finds the article but not the $15,000 sentence.
+- **One must-refuse answered** with an unrelated article.
+The set is now spent.

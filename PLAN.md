@@ -313,3 +313,14 @@ Same method: every step checked with `dev/run_build_checks.py`, `check_finishing
 Written by another fresh Codex session, told not to open submission/, any of dev/ (so none of the earlier sets), PLAN.md, NOTES.md, README.md or results/, and not to run the system. 36 questions (4 per category; 19 public rewordings, 13 new, 4 refusals; styles 8 plain, 8 vocabulary, 8 conversational, 8 messy; 6 paraphrase groups; 4 historical as_of). Local only (`.git/info/exclude`): `dev/untouched2_eval.jsonl`, evidence in `dev/untouched2_evidence.md`.
 
 Seal: `sha256sum dev/untouched2_eval.jsonl` → `0133d1cef681a323bbb86fc33f9ed18fa0a9eafc34fe3d79c221a7eb4f22e73e`, recorded before the run. Key check without running the system: every must_include value is in the snapshot the question's date selects (scorer's `contains()`) and on the expected source page; no must_not_include value overlaps the key. Run once at solution commit `3889133`; no fixes after it.
+
+**Result of the one run** (`python3 harness/run_eval.py --submission submission --eval dev/untouched2_eval.jsonl --out results/untouched2`): final **0.6162** (first sealed set at the earlier commit: 0.3857), accuracy 0.6254, paraphrase consistency 0.83, repeat 1.0, p95 0.06 s, 0 stale traps, 0 errors. By category: entity 0.89, conflict 0.79, branch 0.75, should_refuse 0.75, stale_trap 0.75, current_value 0.54, temporal 0.50, tier 0.50, list 0.21. By the evidence file's style labels: vocabulary 0.86, plain 0.73, messy 0.52, conversational 0.36; public rewordings 0.72, new facts 0.46. 7 of 32 answerable questions refused; one must-refuse answered (drive-up window count at a branch → its address).
+
+Diagnosis only (`python3 dev/trace_refusals.py --all --eval dev/untouched2_eval.jsonl`), no code changed:
+- **The asked-sentence rule drops lowercase subjects in the context sentence** (2 items): "I am considering the 17-month certificate special, the regular one rather than jumbo. Could you tell me its annual yield?" is read as "annual yield" alone. Members put the subject in one sentence and ask about "its" or "that combination" in the next. Our padded set never did this, so it didn't show. A design flaw of `3260f07`, not a tuning gap.
+- **Negation** ("non-jumbo", "rather than jumbo") is read as asking for jumbo (2 items).
+- **Filler chosen as the required word** still ("flat", "hold"), 2 items.
+- **Messy spelling** ("hometart", "12mo cd") and **wrong answer type** ("closing time" read as a date, "which page to trust" read as a link request), 4 items.
+- **Lists of terms** ("every certificate term", "all terms on the rate table"), 2 items: no list answer over a table's term column.
+- **Unanswerable detail about a real branch** ("How many drive-up windows does Galena have?") answered with the branch's address.
+The set is now spent.

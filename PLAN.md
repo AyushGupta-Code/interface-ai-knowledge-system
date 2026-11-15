@@ -307,3 +307,9 @@ Same method: every step checked with `dev/run_build_checks.py`, `check_finishing
 - **Required word.** Try each of the three rarest question words as the required word and keep the one whose best passage scores highest (a capitalised name is always tried; rate families keep their own check). Fixes dup-101-p2 (student loans); every changed answer is more on-topic.
 
 **Rejected:** ordering the required word as names, then page-title words, then the rest (public 0.8868 → 0.8558: "Mullan Avenue" made "avenue" a name and broke the Mullan refusals).
+
+## Second untouched test set (2026-11-15)
+
+Written by another fresh Codex session, told not to open submission/, any of dev/ (so none of the earlier sets), PLAN.md, NOTES.md, README.md or results/, and not to run the system. 36 questions (4 per category; 19 public rewordings, 13 new, 4 refusals; styles 8 plain, 8 vocabulary, 8 conversational, 8 messy; 6 paraphrase groups; 4 historical as_of). Local only (`.git/info/exclude`): `dev/untouched2_eval.jsonl`, evidence in `dev/untouched2_evidence.md`.
+
+Seal: `sha256sum dev/untouched2_eval.jsonl` → `0133d1cef681a323bbb86fc33f9ed18fa0a9eafc34fe3d79c221a7eb4f22e73e`, recorded before the run. Key check without running the system: every must_include value is in the snapshot the question's date selects (scorer's `contains()`) and on the expected source page; no must_not_include value overlaps the key. Run once at solution commit `3889133`; no fixes after it.

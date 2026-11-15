@@ -344,3 +344,20 @@ Checks: no public, reworded or must-refuse item changed; practice 1.0; conflicts
 Written by a third fresh Codex session, told not to open submission/, any of dev/ (so none of the earlier sets), PLAN.md, NOTES.md, README.md or results/, and not to run the system. 36 questions (4 per category; 18 public rewordings, 14 new, 4 refusals; styles 8 plain, 8 vocabulary, 8 conversational, 8 messy; 6 paraphrase groups; 4 historical, 4 two-fact, 3 ruled-out-product questions). Local only (`.git/info/exclude`): `dev/untouched3_eval.jsonl`, `dev/untouched3_evidence.md`.
 
 Seal: `sha256sum dev/untouched3_eval.jsonl` → `e39513d52cb97ba2ded1347f0384f7a3ef53e792c408bee10b3c2d9caec5ad88`, recorded before fixes 4–6 were written. Key check (printing only failures, so the questions stayed unread): all 36 keys in the snapshot the date selects and on the expected source; no must_not_include overlap. It will be run once, after fixes 4–6, with no fixes after it.
+
+## Fixes 4–6 (2026-11-15)
+
+Written after sealing the third untouched set (its questions unread). New development set `dev/shape_eval.jsonl` (`python3 dev/make_shape_eval.py`): 15 questions on public topics with keys read off the latest /rates table and public answer keys — typos and answer-type wording (8), lists of a family's terms (3), counts (4, three of them must refuse).
+
+| Commit | Public | Reworded | Must-refuse | Chatty | Inline | Two-sentence | Shape (4–6) |
+|---|---|---|---|---|---|---|---|
+| `656f695` | 0.8868 | 0.8675 | 18/18 | 0.8984 | 0.7783 | 0.9933 | 0.2 |
+| `42afaf8` | 0.8868 | 0.8675 | 18/18 | 0.8984 | 0.7783 | 0.9933 | **0.9333** |
+
+- **Answer type.** "closing time" / "opening time" are hours questions, and "closing" is only a date question without "time", "hours" or "schedule". A link request needs "link", "URL", "website" or "which page lists/has/shows…"; "not sure which page to trust" is not one.
+- **Typos** (`_respell`, applied to the message first). A lower-case word of 5+ letters the site never uses becomes two site words of 4+ letters run together ("hometart" → home tart), or the site word one slip away (dropped, added, changed or swapped letter) that the site uses in 10+ passages, never changing the first letter; a slip of a common word is corrected too ("curent" → current). Names and number words are left alone. Each guard came from a regression on our own sets: "three" → "tree" (dup-028-p2), "finder" → "binder"/"fender" (dup-080-p2), "weekdays" → "week day".
+- **Stop words after stemming.** "whats" stemmed to "what" and became a required word; stop words are now also checked after stemming.
+- **Lists of a family's terms.** "What terms can I choose for a personal loan?", "List every regular certificate term": a question naming a rate family with "terms" and a list word is a rate question, and lists every row of the winning table that passed the checks, not only the rows scoring as high as the winner. List words never count as the product's type ("every certificate") or as required row words.
+- **Counts.** "How many X does … have?": a passage answers only if it states a number of X ("22 branches", "two windows"); "How many ATMs does the Galena branch have?" now refuses instead of giving the address. "branch offices" counts as the branch count.
+
+Checks: no public, reworded, must-refuse, chatty or two-sentence item changed; practice 1.0; conflicts F1 0.759, 0/8 negatives; 0 stale traps; gates 36/36, `--sixth` 41/41, `--determinism` 37/37; p95 0.32 s. Left failing in the dev set: "hometart grant how much can i get" finds the right article but not its $15,000 sentence.

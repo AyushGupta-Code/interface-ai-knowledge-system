@@ -381,3 +381,7 @@ The set is now spent.
 - "regular", "standard", "normal", "non-jumbo", when the message doesn't also say jumbo, rule out the jumbo rows: a jumbo row is another tier of the same product.
 
 Checks: context 0.7842 → 0.9947; no public, reworded, must-refuse, chatty, inline or shape item changed; practice 1.0; conflicts F1 0.759, 0/8 negatives; 0 stale traps; gates 36/36, `--sixth` 41/41, `--determinism` 37/37.
+
+## Python 3.11 verified (2026-11-15)
+
+Installed `uv` 0.13.8 (`~/.local/bin`, shell profile untouched) and a Python 3.11.18 environment outside the repo (`~/.venvs/interface-311`). With the standard-library-only solution, on 3.11: public 0.8868, reworded 0.8675, must-refuse 1.0, practice 1.0, 0 errors, 0 stale traps; `check_finishing_gates.py` 36/36. One answer differed from 3.14 (dup-008): `urljoin` keeps an empty fragment ("…/savings-account#") on 3.14 and drops it on 3.11. `d8b7de8` strips it; after that every public, reworded and must-refuse answer is byte-identical on 3.11 and 3.14 (`results/pycmp/`). `--sixth` on 3.11: one run reported 40/41 while other checks ran; four further runs 41/41; the failing check was not printed and did not reproduce.

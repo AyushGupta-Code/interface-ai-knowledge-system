@@ -217,6 +217,13 @@ WORDING = set("between highest lowest top best list".split())
 # Words naming the kind of answer wanted (a link, a page). They are read by answer_shape(), and are not
 # topic words: counting them diluted page coverage ("link to the location finder").
 ANSWER_KIND = set("link url website web page list site".split())
+DIAL_CODE = re.compile(r"\+\d{1,4}\b")
+# "How do I change / update ... ?": a request for a procedure on the member's own account.
+PROCEDURE = re.compile(r"\b(?:how|process|steps?)\b", re.I)
+ACCOUNT_CHANGE = re.compile(r"\b(?:chang(?:e|ing)|updat(?:e|ing)|edit(?:ing)?|correct(?:ing)?|amend(?:ing)?|modify(?:ing)?)\b", re.I)
+PHONE = re.compile(r"(?<!\d)(?:1[- .])?\(?\d{3}\)?[- .]\d{3}[- .]\d{4}(?!\d)")
+SUPPORT_TITLE = {"contact": 0, "help": 1, "support": 1, "service": 2}   # lower = more general support page
+
 # Awards from organisations written with initials ("J.D. Power"): see _answer_snapshot.
 AWARD_ASKED = re.compile(r"\b(?:awards?|award-winning|recogni[sz](?:ed|ing|tion)|ranked|prizes?|winner|won|win)\b", re.I)
 DOTTED_NAME = re.compile(r"\b(?:[A-Z]\.\s*){2,}[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*")
@@ -450,6 +457,8 @@ class KnowledgeBase:
                     label = caption
                 else:
                     label = ""
+                if len(DIAL_CODE.findall(text)) >= 4:
+                    continue   # a web form's country picker ("Afghanistan +93 · Albania +355 ..."), not content
                 if len(text) < 3:
                     continue
                 toks = frozenset(tokens(f"{caption} {text}"))
@@ -471,6 +480,7 @@ class KnowledgeBase:
         self._link_index(si)
         self._family_index()
         self._fact_index_get()
+        self._support_index(si)
 
     # -----------------------------------------------------------------------------------------
     def _snapshot_for(self, as_of):
@@ -582,7 +592,7 @@ class KnowledgeBase:
         best_page = max(pcov.values(), default=0.0)
         tr.update(pcov=dict(pcov), best_page=best_page)
         if best_page < 0.5:
-            return Answer(text=REFUSAL, confident=False)
+            return self._support_channel(question, si, tr) or Answer(text=REFUSAL, confident=False)
 
         # Stage B: passages on those pages. Their own words count fully, the page title at half (Q4).
         index, n = self.index[si], max(1, self.n_passages[si])
@@ -668,7 +678,7 @@ class KnowledgeBase:
             score, cutoff, cands = search(pages)
         tr.update(pages=pages, score=score, cutoff=cutoff, cands=cands)
         if not cands:
-            return Answer(text=REFUSAL, confident=False)
+            return self._support_channel(question, si, tr) or Answer(text=REFUSAL, confident=False)
 
         def rank(pid):
             # Authority first (D6); then a page whose title names the question's subject (category words
@@ -690,6 +700,12 @@ class KnowledgeBase:
         win_id = min(cands, key=rank)
         tr["winner"] = win_id
         win = self.passages[win_id]
+        if KIND_RANK[win.kind] >= KIND_RANK["calculator"]:
+            # Only a blog post or calculator matched a "how do I change..." question: the site doesn't
+            # describe the steps, so give the verified way to reach Dupaco instead of a loosely related article.
+            support = self._support_channel(question, si, tr)
+            if support is not None:
+                return support
         sid, taken_on = self.snaps[si]
         sources = [Source(url=win.url, snapshot_id=sid, quote=win.text[:200])]
         if win.table >= 0:
@@ -834,6 +850,44 @@ class KnowledgeBase:
         trace.update(winner=chosen[0][1], link_answer=True)
         return Answer(text="Published links:\n" + "\n".join(
             f"- {label}: {url}" for url, _, _, label in chosen), sources=sources)
+
+    def _support_index(self, si):
+        """(phone, pid) of the snapshot's general support line: the number printed on the most pages,
+        quoted from a contact / help / service page that tells members to call it. Built once."""
+        cache = self.__dict__.setdefault("_support", {})
+        if si not in cache:
+            spread = defaultdict(set)
+            for p in self._snap_passages(si):
+                for ph in PHONE.findall(p.text):
+                    spread[re.sub(r"\D", "", ph)[-10:]].add(p.page)
+            best = None
+            start = sum(self.n_passages[:si])
+            for pid in range(start, start + self.n_passages[si]):
+                p = self.passages[pid]
+                kinds = [r for w, r in SUPPORT_TITLE.items() if w in self.pages[p.page][0]]
+                if p.kind not in ("product", "other") or not kinds or not re.search(r"\bcall\b|\bphone\b", p.text, re.I):
+                    continue
+                for ph in PHONE.findall(p.text):
+                    key = (-len(spread[re.sub(r"\D", "", ph)[-10:]]), min(kinds), len(p.text), p.url, pid)
+                    if best is None or key < best[0]:
+                        best = (key, ph, pid)
+            cache[si] = best and (best[1], best[2])
+        return cache[si]
+
+    def _support_channel(self, question, si, trace):
+        """For "how do I change my address?" when the site doesn't describe the steps: say so, and give
+        the general support line it publishes. Never invents steps."""
+        if not (PROCEDURE.search(question) and ACCOUNT_CHANGE.search(question)):
+            return None
+        found = self._support_index(si)
+        if found is None:
+            return None
+        phone, pid = found
+        p = self.passages[pid]
+        trace.update(winner=pid, support_channel=True)
+        return Answer(text=f"The website doesn't describe the steps for this. You can reach Dupaco at {phone}, "
+                           f"the general phone number it publishes.\nSource: {p.url}",
+                      sources=[Source(url=p.url, snapshot_id=self.snaps[si][0], quote=p.text[:200])])
 
     def _fact_index_get(self):
         """pid -> (snap, fact key), and (snap, fact key) -> url -> measure -> value; built once."""

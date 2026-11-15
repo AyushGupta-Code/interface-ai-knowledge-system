@@ -1,9 +1,9 @@
-"""Build dev/chatty_eval.jsonl: every public question with conversational padding added mechanically.
+"""Build dev/chatty_eval.jsonl and dev/inline_eval.jsonl: every public question with conversational padding added mechanically.
 
 The answer keys are the public ones; only the wording changes. Each wrapper adds words a member might say
 that are not the subject of the question ("planning", "honestly", "figure out"...). This measures whether
 filler words make the system refuse or pick the wrong page. It is a development set (tuned against), not
-a holdout. Usage: python3 dev/make_chatty_eval.py
+a holdout. dev/inline_eval.jsonl puts the padding inside the question sentence instead. Usage: python3 dev/make_chatty_eval.py
 """
 import json
 from pathlib import Path
@@ -16,6 +16,17 @@ WRAPPERS = [
     ("I'm trying to plan ahead for next month. ", ""),
     ("", " Honestly just want a straight answer."),
     ("Hey there! ", " Appreciate the help."),
+]
+
+
+# Padding inside the question sentence itself (one sentence, so the asked-sentence rule can't drop it).
+INLINE = [
+    ("Could you remind me: ", ", if you don't mind me asking?"),
+    ("", " for my household records?"),
+    ("I was wondering, ", " at the moment?"),
+    ("", ", roughly speaking, in plain terms?"),
+    ("Out of curiosity, ", " these days?"),
+    ("Real quick, ", " for someone like me?"),
 ]
 
 
@@ -34,7 +45,14 @@ def main():
             new = dict(it, id=f"{it['id']}-c{k + 1}", question=q, group=f"{it['id']}-chatty")
             out.append(new)
     (ROOT / "dev/chatty_eval.jsonl").write_text("".join(json.dumps(o) + "\n" for o in out))
-    print(len(out), "questions")
+    inline = []
+    for n, it in enumerate(items):
+        pre, post = INLINE[n % len(INLINE)]
+        q = it["question"].rstrip(" ?.")
+        q = pre + (lowered(q) if pre else q) + post
+        inline.append(dict(it, id=f"{it['id']}-i1", question=q, group=None))
+    (ROOT / "dev/inline_eval.jsonl").write_text("".join(json.dumps(o) + "\n" for o in inline))
+    print(len(out), "padded questions,", len(inline), "inline")
 
 
 if __name__ == "__main__":

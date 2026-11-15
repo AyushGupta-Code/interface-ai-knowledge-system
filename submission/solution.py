@@ -223,6 +223,14 @@ def passage_shapes(kind: str, text: str, cells=()) -> frozenset:
 # Category words never decide whether a passage is about the question's specific subject (D9).
 GENERIC = set("""rate interest apr apy dividend yield fee charge cost hour open time address located where branch
 location loan account saving member number link url website page dupaco credit union bank month year""".split())
+# Page coverage a page needs before its passages are searched. 0.5 refused questions padded with words
+# a member says but the site doesn't ("..., roughly speaking, in plain terms?"); 0.4 keeps every
+# must-refuse question refused (the specific word and the family checks do that work, not coverage).
+COV_MIN = 0.4
+# When the question's rarest word empties the candidates, it may be a word of the message, not of the
+# subject ("wondering", "asking"): try the next-rarest word, at most twice. A name the member capitalised
+# ("Mullan", "Chicago") is never dropped, so a branch the site has no hours for still refuses.
+ANCHOR_RETRIES = 2
 BUNDLE_MARGIN = 0.15   # same margin as the candidate cutoff: passages this close are equally good evidence
 
 
@@ -631,7 +639,7 @@ class KnowledgeBase:
                     pcov[pg] += pidf[t] / ptotal
         best_page = max(pcov.values(), default=0.0)
         tr.update(pcov=dict(pcov), best_page=best_page)
-        if best_page < 0.5:
+        if best_page < COV_MIN:
             return self._support_channel(question, si, tr) or Answer(text=REFUSAL, confident=False)
 
         # Stage B: passages on those pages. Their own words count fully, the page title at half (Q4).
@@ -641,7 +649,8 @@ class KnowledgeBase:
         # D9: the question's most specific word (rarest non-generic word the site uses at all, e.g.
         # "construction", "Mullan") must be in the passage or its page title. Otherwise it's a near miss.
         specific = [t for t in qtoks if t not in GENERIC and t not in WORDING and index.get(t)]
-        anchor = min(specific, key=lambda w: (-idf[w], w)) if specific else None
+        specific.sort(key=lambda w: (-idf[w], w))
+        anchor = specific[0] if specific else None
         tr.update(anchor=anchor, idf=idf)
 
         # D9 for rates, by product family (replaces the one-word veto when the question names a family):
@@ -711,11 +720,19 @@ class KnowledgeBase:
 
         # The best-covered pages first; if none of them holds a passing passage, every page that still
         # covers half the question (a refusal only when nothing on the site passes the checks).
-        pages = {pg for pg, c in pcov.items() if c >= 0.75 * best_page}
-        score, cutoff, cands = search(pages)
-        if not cands:
-            pages = {pg for pg, c in pcov.items() if c >= 0.5}
+        names = tokens(" ".join(NAME_WORD.findall(" " + (message or question))))
+        tried = 0
+        while True:
+            pages = {pg for pg, c in pcov.items() if c >= 0.75 * best_page}
             score, cutoff, cands = search(pages)
+            if not cands:
+                pages = {pg for pg, c in pcov.items() if c >= COV_MIN}
+                score, cutoff, cands = search(pages)
+            if cands or anchor is None or anchor in names or tried >= ANCHOR_RETRIES:
+                break
+            tried += 1
+            anchor = specific[tried] if tried < len(specific) else None
+            tr.setdefault("dropped_anchor", []).append(specific[tried - 1])
         tr.update(pages=pages, score=score, cutoff=cutoff, cands=cands)
         if not cands:
             return self._support_channel(question, si, tr) or Answer(text=REFUSAL, confident=False)

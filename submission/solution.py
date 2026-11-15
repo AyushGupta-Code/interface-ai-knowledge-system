@@ -217,6 +217,11 @@ WORDING = set("between highest lowest top best list".split())
 # Words naming the kind of answer wanted (a link, a page). They are read by answer_shape(), and are not
 # topic words: counting them diluted page coverage ("link to the location finder").
 ANSWER_KIND = set("link url website web page list site".split())
+# "Do all branches keep the same lobby hours?": a comparison across branches, not one branch's hours.
+COMPARE = re.compile(r"\b(?:same|identical|differ(?:ent|s)?|vary|varies|consistent|uniform)\b", re.I)
+HOURS_WORD = re.compile(r"\b(?:hours?|times?|schedules?|open(?:ing)?|clos(?:e|es|ing))\b", re.I)
+MANY_PLACES = re.compile(r"\b(?:branch(?:es)?|locations?|lobb(?:y|ies)|offices?|every|all|each)\b", re.I)
+SERVICE_SCHEDULE = re.compile(r"\*\*(Lobby|Drive-up)\*\*\s*·?\s*(.+)", re.I)
 DIAL_CODE = re.compile(r"\+\d{1,4}\b")
 # "How do I change / update ... ?": a request for a procedure on the member's own account.
 PROCEDURE = re.compile(r"\b(?:how|process|steps?)\b", re.I)
@@ -481,6 +486,7 @@ class KnowledgeBase:
         self._family_index()
         self._fact_index_get()
         self._support_index(si)
+        self._schedule_index(si)
 
     # -----------------------------------------------------------------------------------------
     def _snapshot_for(self, as_of):
@@ -569,6 +575,9 @@ class KnowledgeBase:
         tr.update(qtoks=qtoks, qnums=qnums, shape=shape)
         if not qtoks:
             return Answer(text=REFUSAL, confident=False)
+        compared = self._schedule_comparison(question, si, tr)
+        if compared is not None:
+            return compared
         if shape in ("count", "any"):
             article = self._article_answer(question, si, tr)
             if article is not None:
@@ -850,6 +859,46 @@ class KnowledgeBase:
         trace.update(winner=chosen[0][1], link_answer=True)
         return Answer(text="Published links:\n" + "\n".join(
             f"- {label}: {url}" for url, _, _, label in chosen), sources=sources)
+
+    def _schedule_index(self, si):
+        """service ('lobby' / 'drive-up') -> {schedule as written, normalised: newest pid stating it}.
+        Branch schedules are published in dated branch announcements ("**Lobby** · Monday-Friday: ...")."""
+        cache = self.__dict__.setdefault("_schedules", {})
+        if si not in cache:
+            out = defaultdict(dict)
+            start = sum(self.n_passages[:si])
+            for pid in range(start, start + self.n_passages[si]):
+                p = self.passages[pid]
+                m = SERVICE_SCHEDULE.search(p.text)
+                if not m or not TIME.search(m.group(2)) or (p.date and p.date > self.snaps[si][1]):
+                    continue
+                key = re.sub(r"\s+", " ", re.sub(r"[–—]", "-", m.group(2).lower())).strip(" ·")
+                old = out[m.group(1).lower()].get(key)
+                if old is None or (p.date, p.url) > (self.passages[old].date, self.passages[old].url):
+                    out[m.group(1).lower()][key] = pid
+            cache[si] = dict(out)
+        return cache[si]
+
+    def _schedule_comparison(self, question, si, trace):
+        """"Are the lobby hours the same at every branch?": list each distinct published schedule, newest
+        first, with the announcement it comes from. Says they differ only when two or more differ."""
+        if not (COMPARE.search(question) and HOURS_WORD.search(question) and MANY_PLACES.search(question)):
+            return None
+        service = "drive-up" if re.search(r"\bdrive\b|drive-?up|drive-?thr", question, re.I) else "lobby"
+        found = self._schedule_index(si).get(service, {})
+        if len(found) < 2:
+            return None
+        pids = sorted(found.values(), key=lambda i: (_neg(self.passages[i].date or ""), self.passages[i].url))[:5]
+        lines = [f"No. Dupaco has published different {service} hours for different branches. These come from "
+                 f"branch announcements, newest first, so check your branch's current hours:"]
+        for pid in pids:
+            p = self.passages[pid]
+            sched = SERVICE_SCHEDULE.search(p.text).group(2).strip(" ·")
+            lines.append(f"- {sched} ({p.title}, {p.date or 'undated'})")
+        trace.update(winner=pids[0], schedule_comparison=True)
+        sid = self.snaps[si][0]
+        return Answer(text="\n".join(lines),
+                      sources=[Source(url=self.passages[i].url, snapshot_id=sid, quote=self.passages[i].text[:200]) for i in pids])
 
     def _support_index(self, si):
         """(phone, pid) of the snapshot's general support line: the number printed on the most pages,

@@ -324,3 +324,17 @@ Diagnosis only (`python3 dev/trace_refusals.py --all --eval dev/untouched2_eval.
 - **Lists of terms** ("every certificate term", "all terms on the rate table"), 2 items: no list answer over a table's term column.
 - **Unanswerable detail about a real branch** ("How many drive-up windows does Galena have?") answered with the branch's address.
 The set is now spent.
+
+## Fixes 1 and 2 from the second sealed set's diagnosis (2026-11-15)
+
+Fixed after reading the second sealed set's failures, so that set can no longer measure them. New development set `dev/context_eval.jsonl` (`python3 dev/make_context_eval.py`): 15 public facts asked with the subject in one sentence and "its"/"that" in the next (10), or with a product ruled out (5); public answer keys, hand-written wording.
+
+| Commit | Public | Reworded | Must-refuse | Chatty | Inline | Two-sentence / negation |
+|---|---|---|---|---|---|---|
+| `3889133` | 0.8868 | 0.8675 | 18/18 | 0.8868 | 0.7783 | 0.3556 |
+| `656f695` | 0.8868 | 0.8675 | 18/18 | **0.8984** | 0.7783 | **0.9933** |
+
+- **Other sentences' words count, at weight 0.2.** Before, only their capitalised names were kept, so "I'm looking at your 17-month special certificate. What APY does it pay?" was read as "What APY does it pay?". They now count toward page coverage and passage score at CONTEXT_WEIGHT, are never the required word, and a rate family named only there is still found. Swept 0.5 / 0.3 / 0.2: chatty 0.8636 / 0.8965 / 0.8984, everything else equal; 0.5 let padding sentences pull answers off topic.
+- **Ruled-out words.** "non-jumbo", "not the jumbo one", "rather than the Rewards Visa", "instead of the money market", "except…", "other than…": the word is removed from the question and rate rows that contain it are not answers. One word, two after "regular"/"standard"; a generic word ("not open") leaves the question unchanged. A first version took two words and turned "not open Saturday" into ruling out Saturday; fixed before commit.
+
+Checks: no public, reworded or must-refuse item changed; practice 1.0; conflicts F1 0.759, 0/8 negatives; 0 stale traps; gates 36/36, `--sixth` 41/41, `--determinism` 37/37; p95 0.29 s. `dup-054-ctx1` (routing number with an employer sentence) lost the source credit (1 → 0.85).

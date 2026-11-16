@@ -16,6 +16,7 @@ from bisect import bisect_right
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urljoin, urlparse
 
 sys.path.insert(0, str(next(d / "harness" for d in Path(__file__).resolve().parents if (d / "harness" / "contract.py").exists())))
@@ -84,7 +85,7 @@ SYNONYMS = [
     (r"\bcredit cards?\b", "visa"),
     (r"\baba\b", "routing"),
     (r"\barms?\b|\badjustable[- ]rate\b", "adjustable"),
-    (r"\bbecome a member\b|\bmembership\b", "join"),
+    (r"\bbecome an? (?:[\w']+ )?member\b|\bmembership\b", "join"),
     (r"\b(apple|google|samsung) pay\b|\bmobile wallets?\b|\btap to pay\b", "mobile wallet pay"),
     (r"\byield\b", "apy"),
     (r"\binterest rates?\b", "rate"),     # tables say "Rate"/"APR"; "interest" only matched prose (trace: dup-011)
@@ -184,13 +185,16 @@ def tokens(text: str) -> set[str]:
 
 
 def stem(w: str) -> str:
-    """Plural to singular, enough for this site's vocabulary: branches, addresses, policies, rates."""
+    """Plural to singular, enough for this site's vocabulary: branches, addresses, policies, rates; and
+    -ibility/-ability to -ible/-able, so "flexibility" meets "flexible"."""
     if len(w) <= 3 or w.endswith("ss"):
         return w
     if w.endswith(("ches", "shes", "xes", "sses", "zes")):
         return w[:-2]
     if w.endswith("ies"):
         return w[:-3] + "y"
+    if w.endswith(("ibility", "ability")) and len(w) > 8:
+        return w[:-5] + "le"    # flexibility -> flexible, eligibility -> eligible
     return w[:-1] if w.endswith("s") else w
 
 
@@ -291,6 +295,10 @@ REQ_PENALTY = 0.5   # a family word missing from a rate row (not a row-label wor
 LINK_TARGET = re.compile(r"\]\((?:https?://|/)[^)\s]*\)")
 # Words that narrow an organisation-wide count to another scope ("drive-up locations", "in which states").
 SCOPE_WORDS = {stem(w) for w in "state states city cities county counties town towns area region driveup atm atms drive lobby employee employees member members staff".split()}
+# A place a passage names without describing it, and the site's statement of where it serves.
+AREA_TERM = re.compile(r"\b(?:charter|service|our|geographic) area\b|\bfield of membership\b", re.I)
+AREA_STATEMENT = re.compile(r"[^.\n]*\bserves? (?:residents|members)\b[^.\n]*\b(?:in|throughout)\b[^.\n]*\b(?:Iowa|Illinois|Wisconsin)\b[^.\n]*\.")
+RELATIVE_YEAR = re.compile(r"\b(?:last|previous|past|prior) year\b|\ba year ago\b", re.I)
 INFER_SPREAD = 3   # a word at most this many families' rows use still points to a family
 INFER_MIN = 1.0   # the inferred family needs at least one distinctive word (or several shared ones)
 INFER_RATIO = 0.6   # and the runner-up must score below this share of it
@@ -967,7 +975,24 @@ class KnowledgeBase:
             parts = [self.passages[pid].text for pid in sorted(near)]
             body = " ... ".join(parts)
             body = body if len(body) <= 900 else body[:900].rsplit(" ", 1)[0] + " ..."
+            if RELATIVE_YEAR.search(message or question):
+                # "last year" depends on when it was written: a statement repeated year by year ("294 employees
+                # ... in 2023", "256 ... in 2024") is a series, so give every year the site states.
+                shown = set(parts)
+                for pid in sorted(near):
+                    for other in self._yearly_versions(pid, si):
+                        if other.text not in shown:
+                            shown.add(other.text)
+                            body += f"\nAlso stated: {other.text}"
+                            sources.append(Source(url=other.url, snapshot_id=sid, quote=other.text[:200]))
         body = expand_providers(body)
+        if AREA_TERM.search(body) and not re.search(r"\b(?:Iowa|Illinois|Wisconsin)\b", body):
+            # "within our charter area" links to a map image: say the area in words, from the site's own
+            # newest statement of where it serves residents.
+            area = self._area_statement(si)
+            if area is not None:
+                body += f"\nDupaco's area: {area.text_sentence}"
+                sources.append(Source(url=area.url, snapshot_id=self.snaps[si][0], quote=area.text_sentence[:200]))
         when = f"as of {taken_on}"
         text = f"{win.title or 'Dupaco'} ({when}):\n{body}\nSource: {win.url}"
         return Answer(text=text, sources=sources)
@@ -1253,6 +1278,47 @@ class KnowledgeBase:
             # The family's own name ("certificate") is true of every row, labelled or not.
             cache[key] = words - set().union(*(tokens(f) for f in group))
         return cache[key]
+
+    def _yearly_versions(self, pid, si) -> list:
+        """Passages elsewhere in snapshot si that state the same thing as passage pid for another year:
+        mostly the same words, a different year and a different number. Newest year first."""
+        win = self.passages[pid]
+        years = set(re.findall(r"\b(?:19|20)\d\d\b", win.text))
+        if not years:
+            return []
+        index = self.index[si]
+        rare = sorted(win.toks, key=lambda w: (len(index.get(w, ())), w))[:5]
+        out = []
+        for other_id in sorted({i for w in rare for i in index.get(w, ())}):
+            o = self.passages[other_id]
+            if other_id == pid or o.page == win.page or o.table >= 0:
+                continue
+            overlap = len(win.toks & o.toks) / max(1, len(win.toks | o.toks))
+            o_years = set(re.findall(r"\b(?:19|20)\d\d\b", o.text))
+            if overlap >= 0.5 and o_years and not o_years & years \
+                    and set(NUM.findall(o.text)) != set(NUM.findall(win.text)) \
+                    and all(o.text != x.text for x in out):
+                out.append(o)
+        return sorted(out, key=lambda o: max(re.findall(r"\b(?:19|20)\d\d\b", o.text)), reverse=True)[:2]
+
+    def _area_statement(self, si):
+        """The newest sentence in snapshot si saying where Dupaco serves residents or members
+        ("Dupaco serves residents in 118 counties throughout Iowa, northwest Illinois and southwest Wisconsin.")."""
+        cache = self.__dict__.setdefault("_area_cache", {})
+        if si not in cache:
+            best = None
+            for p in self._snap_passages(si):
+                m = AREA_STATEMENT.search(p.text)
+                if m:
+                    key = (p.date or "", -KIND_RANK[p.kind], p.url)
+                    if best is None or key > best[0]:
+                        best = (key, p, m.group(0).strip())
+            if best is None:
+                cache[si] = None
+            else:
+                _, p, sentence = best
+                cache[si] = SimpleNamespace(url=p.url, text_sentence=sentence)
+        return cache[si]
 
     def _infer_family(self, words, si) -> str:
         """A rate question that doesn't name its product ("the 17-month jumbo special", "a 15-year fixed

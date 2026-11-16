@@ -530,3 +530,27 @@ Diagnosis only, no code changed. The set is now spent. Most misses are gaps in k
 - **Lists:** "all three business checking options", "both business Visa cards".
 - **Filler questions:** a routing number and general lobby hours.
 - **One must-refuse answered:** "rewards visa lowest fico score" got an unrelated article.
+
+## Answer-more round 2 (2026-11-15)
+
+Sealed set 5 has been asked of a fresh Codex session, with the same instructions as set 4. Set 4 is spent and is now a development set. Two goals in this round:
+- **Close the public misses with general mechanisms.** The hidden set rewords the public questions.
+- **Fix the gap kinds set 4 found.**
+
+**Step 7: say what a linked area is, give every year of a yearly statement, and -ibility meets -ible.** Kept.
+- **"Become a Dupaco member" is a join question.** The synonym "become a member" now allows a word in between.
+- **A linked area is said in words.** The join page's "You live or work within our [charter area](…map.jpg)" points to a map image, which the system can't read. When an answer names such an area (charter, service or geographic area, field of membership) without a state, it now adds the snapshot's newest sentence saying where Dupaco serves residents ("…118 counties throughout Iowa, northwest Illinois and southwest Wisconsin"), with its source. Public 0.8868 → 0.9178; mean 0.8905 → 0.9024.
+- **"Last year" depends on when it was written.** For a question with last, previous or past year, a statement that other pages repeat with another year and number (at least 50% shared words, a different year, different numbers) is given too ("256 employees … in 2024"; "294 … in 2023"). Public → 0.9411; mean → 0.9102.
+- **Stemming.** "flexibility" now stems to "flexible" and "eligibility" to "eligible". This fixed dup-101 (student loans) and one chatty rewording, but broke dup-101-p2 and dup-101-c2: reworded 0.8848 → 0.8713, chatty 0.9527 → 0.9506. Public → 0.9643; mean → 0.9110. Kept by the mean rule.
+- **Rejected:**
+  - Choosing among the required-word options by page authority, or trying 5 options instead of 3: mean 0.9073–0.9106.
+  - Making the subject of a product page's title ("Student" of "Student Loans") the required word: no gain over the stemming change.
+
+| | Public | Reworded | Must-refuse | Chatty | Inline | Context | Shape | S1 | S2 | S3 | Mean |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Step 7 | **0.9643** | 0.8713 | 18/18 | **0.9506** | **0.8326** | 0.9947 | 1.0 | 0.8247 | 0.8974 | **0.8634** | **0.9110** |
+
+Checks:
+- 0 stale traps on every set.
+- Gate scripts: 36/36, `--sixth` 41/41, `--determinism` 37/37.
+- Conflicts: F1 0.759, resolution 1.0, 0/8 negatives.

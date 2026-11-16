@@ -580,3 +580,20 @@ Checks:
 - 0 stale traps on every set.
 - Gate scripts: 36/36, `--sixth` 41/41, `--determinism` 37/37.
 - Conflicts: F1 0.759, resolution 1.0, 0/8 negatives.
+
+## Fifth untouched test set (2026-11-16)
+
+Written by a fresh Codex session with the same instructions as set 4 (no access to submission/, dev/, PLAN.md, NOTES.md, README.md, results/ or /tmp; no running the system). Local only (`.git/info/exclude`): `dev/untouched5_eval.jsonl`, `dev/untouched5_evidence.md`.
+
+Seal: `sha256sum dev/untouched5_eval.jsonl` → `85e23a4ce7f2ac96df2ab432cdd4096cf24bad6b2d56e03d39adfdbde1586d4a`, recorded before any run. Key check without running the system: 36/36 OK, 4 per category, 4 dated questions.
+
+**Run once at `609ce09`** (`python3 harness/run_eval.py --submission submission --eval dev/untouched5_eval.jsonl`):
+- **Final 0.7114.** Accuracy 0.722, consistency 0.6618, 0 stale traps, 0 errors, p95 0.16 s, ingest 24.2 s.
+- **First runs of the sealed sets so far:** set 1 0.3857, set 2 0.6162, set 3 0.657, set 4 0.5192 (0.6398 after one round), set 5 **0.7114**.
+- **By category:** branch 1.00, stale_trap 1.00, temporal 0.96, entity 0.93, should_refuse 0.75, current_value 0.64, conflict 0.50, tier 0.50, list 0.11.
+
+Diagnosis (the set is now spent):
+- **Refused, answerable (7):** a regular special "not the jumbo" with "promotional"; a misspelt "persnal loan 48 mos not 36"; the states of the join area asked without "join"; a messy "10mo regular cert special not jumbo"; the two ways to waive the HSA fee; the two things that close a LaunchPad account.
+- **Wrong sentence or part of a list (5):** the Holiday Club pay-out date (an old news article won), the HSA opening deposit, the three money market names, the Bright Savings exclusions (its rate row won over its footnote).
+- **Source credit only (3):** the routing number from the wire page, not the contact page; a jumbo special from the business page, not the personal one.
+- **One must-refuse answered:** "how many safe-deposit boxes are available" got the fee schedule's box sizes.

@@ -503,3 +503,17 @@ Checks:
 - 0 stale traps on every set.
 - Gate scripts: 36/36, `--sixth` 41/41, `--determinism` 37/37.
 - Conflicts: F1 0.759, resolution 1.0, 0/8 negatives.
+
+**Step 6: a two-part question isn't a count or a date question.** Kept.
+- **What was wrong.** "What is the fee per overdraft, and after how many days overdrawn…?" was read as a count question because of "how many". Only a passage stating a number of days could answer, and none did. "What's the maximum Home$tart help, and can it go toward the down payment or closing bill?" was read as a date question because of "closing".
+- **The fix.** A question joining two asks (", and how/what/when/can…", or "both … and …") no longer takes the count or date shape.
+- **Rejected: also dropping the rate and fee shapes for such questions.** It broke three rate questions, one of them a must-refuse rewording (reworded 0.8694 → 0.8393).
+
+| | Public | Reworded | Must-refuse | Chatty | Inline | Context | Shape | S1 | S2 | S3 | Mean |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Step 6 | 0.8868 | 0.8694 | 18/18 | 0.8984 | 0.8093 | 0.9947 | 1.0 | **0.8247** | 0.8974 | **0.8340** | **0.8905** |
+
+Checks:
+- 0 stale traps on every set.
+- Gate scripts: 36/36, `--sixth` 41/41, `--determinism` 37/37.
+- Conflicts: F1 0.759, resolution 1.0, 0/8 negatives.

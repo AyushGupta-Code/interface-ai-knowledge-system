@@ -204,6 +204,13 @@ RATE_KINDS = ("rates", "product", "promo", "other")   # calculators, articles an
 
 
 def answer_shape(question: str) -> str:
+    shape = _answer_shape(question)
+    if shape in ("count", "date") and TWO_PART.search(question.lower()):
+        return "any"   # "the fee per overdraft, and after how many days…": a count is only half of what is asked
+    return shape
+
+
+def _answer_shape(question: str) -> str:
     q = question.lower()
     if re.search(r"\bhow (?:do|can|should) (?:i|we) (?:change|update|edit|correct)\b", q):
         return "any"   # "How do I change my address?" asks for a procedure, not an address
@@ -232,6 +239,8 @@ def answer_shape(question: str) -> str:
     return "any"
 
 
+TWO_PART = re.compile(r",\s*and\s+(?:what|how|when|which|where|after|is|are|can|could|does|do|will|would)\b"
+                      r"|\bboth\b.+\band\b")
 RATE_WORD = re.compile(r"\b(rates?|apr|apy|annual percentage|dividends?|yield|interest)\b", re.I)
 
 

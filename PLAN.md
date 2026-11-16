@@ -627,3 +627,15 @@ Checks:
 | Step 10 | 0.9643 | 0.8713 | 18/18 | 0.9506 | 0.8326 | 0.9947 | 1.0 | 0.8247 | 0.9314 | 0.8634 | 0.7819 | **0.8349** | **0.8954** |
 
 Checks: 0 stale traps; p95 0.68 s; gates 36/36, 41/41, 37/37; conflicts F1 0.7586, resolution 1.0, 0/8 negatives.
+
+**Step 11: a date without a year, member wording for fees and closing, and "2 things" isn't a qualifier.** Kept.
+- **A date without a year is a date.** "On Oct. 31, your balance automatically transfers" had no date shape, because a date needed a year. A date question about the Holiday Club got a 2021 news story instead. A month and a day now count as a date.
+- **New synonyms:** "maintenance fee/charge" means the site's "service fee"; "acct" means account; "closure" means closed.
+- **"What 2 things…" is how many answers the member expects**, not a number the passage must contain. A digit before things, ways, reasons, options, steps, types, requirements and similar words is no longer a qualifier.
+- Only set 5 moved. The rules are general, but no other set had these forms.
+
+| | Public | Reworded | Must-refuse | Chatty | Inline | Context | Shape | S1 | S2 | S3 | S4 | S5 | Mean (11) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Step 11 | 0.9643 | 0.8713 | 18/18 | 0.9506 | 0.8326 | 0.9947 | 1.0 | 0.8247 | 0.9314 | 0.8634 | 0.7819 | **0.9038** | **0.9017** |
+
+Checks: 0 stale traps; p95 0.65 s; gates 36/36, 41/41, 37/37; conflicts F1 0.7586, resolution 1.0, 0/8 negatives.

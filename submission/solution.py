@@ -97,6 +97,9 @@ SYNONYMS = [
     (r"\bvto\b", "volunteer time off"),
     (r"\bshut(?:ting)?(?: down)?\b", "close"),
     (r"\bholding\b", "balance"),
+    (r"\bmaintenance (?:fees?|charges?)\b", "service fee"),   # the site says "monthly service fee"
+    (r"\baccts?\b", "account"),
+    (r"\bclosures?\b", "closed"),
     (r"\b(?:mid|early|late)[- ]?(?=(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b)", ""),
 ]
 STOP = set("""a an the is are was were be been do does did can could would should will may might of to in on at for
@@ -207,7 +210,9 @@ def stem(w: str) -> str:
 TIME = re.compile(r"\b\d{1,2}(?::\d\d)?\s*(?:a\.?m\b|p\.?m\b)|\bnoon\b", re.I)
 ADDRESS = re.compile(r"\b\d{2,6}\s+(?:[\w.]+\s+){0,4}(?:St|Street|Ave|Avenue|Rd|Road|Ln|Lane|Dr|Drive|Blvd|Way|Hwy|Highway|Ct|Pkwy|Pl|Cir)\b"
                      r"|\b[A-Z]{2},?\s+\d{5}\b")
-DATE_TEXT = re.compile(r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+(?:19|20)\d\d\b|\b(?:19|20)\d\d-\d\d-\d\d\b")
+DATE_TEXT = re.compile(r"\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+(?:19|20)\d\d\b|\b(?:19|20)\d\d-\d\d-\d\d\b"
+                       # a yearly date ("On Oct. 31, your balance transfers"): a month and a day, no year
+                       r"|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:[a-z]+|\.)?\s+\d{1,2}(?:st|nd|rd|th)?\b(?![\d:]|,?\s*\d)")
 RATE_KINDS = ("rates", "product", "promo", "other")   # calculators, articles and files hold the stale rates
 
 
@@ -391,6 +396,10 @@ RULED_OUT_NUMBER = re.compile(r"\b(?:not|instead\s+of|rather\s+than|other\s+than
 SPACED_RATE = re.compile(r"(?<![\d.,$])\b\d\s\d\d\b(?![\d.,])(?!\s*(?:months?|years?|mos?|yrs?|monthly)\b)\s*%?", re.I)
 
 
+COUNT_OF_ASKED = re.compile(r"\b\d\s+(?:\w+\s+)?(?:things|ways|reasons|options|choices|items|steps|types|kinds|"
+                            r"conditions|requirements|rules|parts|facts|values|names|products|accounts)\b", re.I)
+
+
 class TermMonths(float):
     """A term qualifier in months, distinct from balances and model years."""
 
@@ -404,6 +413,8 @@ def question_numbers(question: str) -> list[float]:
     question = RULED_OUT_NUMBER.sub(" ", question)
     # "old sheet says 3 80": a rate typed with a space for the point is a percentage, not a qualifier
     question = SPACED_RATE.sub(" ", question)
+    # "what 2 things close the account": how many answers the member expects, not a qualifier
+    question = COUNT_OF_ASKED.sub(" ", question)
     # "36 and 48 months", "12 or 24-month": the unit belongs to every number of the list
     question = re.sub(r"\b(\d+)(?=(?:\s*(?:,|and|or|&)\s*\d+)+[- ]+(months?|years?|mo|yr)\b)",
                       lambda m: f"{m.group(1)} {m.group(2)}", question, flags=re.I)

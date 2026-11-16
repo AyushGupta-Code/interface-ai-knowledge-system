@@ -517,3 +517,16 @@ Checks:
 - 0 stale traps on every set.
 - Gate scripts: 36/36, `--sixth` 41/41, `--determinism` 37/37.
 - Conflicts: F1 0.759, resolution 1.0, 0/8 negatives.
+
+**Sealed set 4, run once at `38f5ab1`** (`python3 harness/run_eval.py --submission submission --eval dev/untouched4_eval.jsonl`, hash checked):
+- **Final 0.6398, against 0.5192 at `560a225` before this round.** Accuracy 0.6694, 1 stale trap, 0 errors, p95 0.2 s.
+- **By category:** conflict 1.00, stale_trap 1.00, should_refuse 0.75, entity 0.75, tier 0.71, temporal 0.54, branch 0.50, current_value 0.50, list 0.07.
+
+Diagnosis only, no code changed. The set is now spent. Most misses are gaps in kinds this round already worked on:
+- **Vocabulary:** "promo CD" for the special, "satnav", "settlement costs", "biz".
+- **A modifier the rows don't use:** "unsecured personal loan".
+- **Two terms in one question:** "36 and 48 months", "half-year and one-year". Every qualifier number must be in the same row, so neither row passes.
+- **"non jumbo" written with a space:** this produced the one stale trap (the jumbo 3.70% given).
+- **Lists:** "all three business checking options", "both business Visa cards".
+- **Filler questions:** a routing number and general lobby hours.
+- **One must-refuse answered:** "rewards visa lowest fico score" got an unrelated article.

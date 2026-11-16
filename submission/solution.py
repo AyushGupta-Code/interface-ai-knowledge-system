@@ -88,6 +88,10 @@ SYNONYMS = [
     (r"\bbecome an? (?:[\w']+ )?member\b|\bmembership\b", "join"),
     (r"\b(apple|google|samsung) pay\b|\bmobile wallets?\b|\btap to pay\b", "mobile wallet pay"),
     (r"\byield\b", "apy"),
+    (r"\bpromo\b", "special"),        # "the 17-month promo CD" is the special ("promotional" APRs are not)
+    (r"\bbiz\b", "business"),
+    (r"\bsettlement costs?\b", "closing costs"),
+    (r"\bhalf[- ]year\b", "6 month"),
     (r"\binterest rates?\b", "rate"),     # tables say "Rate"/"APR"; "interest" only matched prose (trace: dup-011)
     (r"\b(college|university)\b", "student"),
     (r"\bvto\b", "volunteer time off"),
@@ -141,7 +145,7 @@ def focus_question(question: str) -> str:
     return core + (" (" + ", ".join(names) + ")" if names else "")
 
 
-NEGATED = re.compile(r"\b(?:non-|not\s+(?:the\s+|a\s+|an\s+)?|rather\s+than\s+(?:the\s+|a\s+|an\s+)?|"
+NEGATED = re.compile(r"\b(?:non[- ]|not\s+(?:the\s+|a\s+|an\s+)?|rather\s+than\s+(?:the\s+|a\s+|an\s+)?|"
                      r"instead\s+of\s+(?:the\s+|a\s+|an\s+)?|other\s+than\s+(?:the\s+|a\s+|an\s+)?|"
                      r"excluding\s+(?:the\s+)?|except\s+(?:for\s+)?(?:the\s+)?|leaving\s+out\s+(?:the\s+)?|"
                      r"without\s+(?:the\s+|a\s+|an\s+)?|skip(?:ping)?\s+(?:the\s+)?)"
@@ -150,7 +154,7 @@ NEGATED = re.compile(r"\b(?:non-|not\s+(?:the\s+|a\s+|an\s+)?|rather\s+than\s+(?
 
 # "the regular / standard 17-month special" is the one that isn't jumbo: a jumbo row is another tier of the
 # same product, and giving its value next to the regular one is a wrong-tier answer.
-REGULAR_TIER = re.compile(r"\b(?:regular|standard|normal|non-?jumbo)\b", re.I)
+REGULAR_TIER = re.compile(r"\b(?:regular|standard|normal|non[- ]?jumbo)\b", re.I)
 BIG_TIER = frozenset({"jumbo"})
 
 
@@ -327,7 +331,7 @@ WORDING = set("between highest lowest top best list".split())
 ANSWER_KIND = set("link url website web page list site".split())
 # For an address question, words naming the parts of an address describe the answer, not the place:
 # "185 Peosta St., Peosta, IA, 52068" says neither "street" nor "ZIP".
-ADDRESS_KIND = {stem(w) for w in "address addresses street zip zipcode postal code located location navigation gps".split()}
+ADDRESS_KIND = {stem(w) for w in "address addresses street zip zipcode postal code located location navigation gps satnav maps".split()}
 # "Do all branches keep the same lobby hours?": a comparison across branches, not one branch's hours.
 COMPARE = re.compile(r"\b(?:same|identical|differ(?:ent|s)?|vary|varies|consistent|uniform)\b", re.I)
 HOURS_WORD = re.compile(r"\b(?:hours?|times?|schedules?|open(?:ing)?|clos(?:e|es|ing))\b", re.I)
@@ -388,6 +392,10 @@ def question_numbers(question: str) -> list[float]:
     """Numbers that qualify the question (terms, amounts, model years); percentages and dates are not qualifiers."""
     out = []
     question = DATE_SPAN.sub(" ", question)
+    question = re.sub(r"\bhalf[- ]year\b", "6 month", question, flags=re.I)
+    # "36 and 48 months", "12 or 24-month": the unit belongs to every number of the list
+    question = re.sub(r"\b(\d+)(?=(?:\s*(?:,|and|or|&)\s*\d+)+[- ]+(months?|years?|mo|yr)\b)",
+                      lambda m: f"{m.group(1)} {m.group(2)}", question, flags=re.I)
     # Convert spelled-out terms, not conversational numbers such as "which one".
     question = re.sub(r"\b(" + NUMBER_WORDS_RE + r")\b(?=[ -]+(?:months?|years?|mo|yr|monthly payments?)\b)",
                       lambda m: str(WORD_NUMBERS[m.group(1).lower()]), question, flags=re.I)
@@ -424,11 +432,16 @@ def numbers_ok(qnums: list[float], text: str) -> bool:
     if not qnums:
         return True
     nums, years, money = number_spans(text)
+    terms = {float(v) * (12 if unit.lower().startswith(("year", "yr")) else 1)
+             for v, unit in re.findall(r"\b(\d+(?:\.\d+)?)[- ]+(months?|years?|mo|yr)\b", text, re.I)}
+    asked_terms = [n for n in qnums if isinstance(n, TermMonths)]
+    if len(asked_terms) > 1:
+        # "the 36- and 48-month certificates": a row of either term answers its half
+        if not any(n in terms for n in asked_terms):
+            return False
     for n in qnums:
         if isinstance(n, TermMonths):
-            terms = {float(v) * (12 if unit.lower().startswith(("year", "yr")) else 1)
-                     for v, unit in re.findall(r"\b(\d+(?:\.\d+)?)[- ]+(months?|years?|mo|yr)\b", text, re.I)}
-            if n not in terms:
+            if len(asked_terms) == 1 and n not in terms:
                 return False
             continue
         if n in nums:
@@ -747,7 +760,7 @@ class KnowledgeBase:
             # A rate question naming a product family the site publishes rates for: the family check below
             # decides which rows answer, so other words of the question can't make every page fall short.
             fam = (_family_of(canonical(question)) or _family_of(canonical(message or question))
-                   or self._infer_family(qtoks | ctx, si))
+                   or self._infer_family(qtoks, si, ctx))
             by_family = self._family_index()[si][0] if fam else {}
             fam_pages = {self.passages[pid].page for f in by_family if f == fam or CATEGORY.get(f) == fam
                          for pid in by_family[f]}
@@ -776,7 +789,7 @@ class KnowledgeBase:
         # that no row of the family has ("reverse", "interest-only" mortgage, "Unicorn" Savings), refuses.
         fam_rows, required, label_words = None, set(), set()
         qfam = (_family_of(canonical(question)) or _family_of(canonical(message or question))
-                or self._infer_family(qtoks | ctx, si)) if shape == "rate" else ""
+                or self._infer_family(qtoks, si, ctx)) if shape == "rate" else ""
         tr["family"] = qfam
         if shape == "rate" and not qfam:
             # A rate for a product the site has no rate family for (construction, payday, student loans).
@@ -1320,21 +1333,25 @@ class KnowledgeBase:
                 cache[si] = SimpleNamespace(url=p.url, text_sentence=sentence)
         return cache[si]
 
-    def _infer_family(self, words, si) -> str:
+    def _infer_family(self, words, si, context=frozenset()) -> str:
         """A rate question that doesn't name its product ("the 17-month jumbo special", "a 15-year fixed
         conventional purchase"): the family whose rate rows use the question's distinctive words, when
         exactly one family is clearly best. Words that most families' rows use don't count."""
         by_family, vocab = self._family_index()[si]
         # An IRA is an account wrapper around certificates and savings: only a question that says so asks for one.
         fams = [f for f in by_family if by_family[f] and f != "IRA"]
-        content = {w for w in words if w not in GENERIC and w not in WORDING and w not in STOP}
+        # Words of the other sentences count at CONTEXT_WEIGHT, as everywhere ("I am checking an old offer").
+        weight = {w: 1.0 for w in words}
+        for w in context:
+            weight.setdefault(w, CONTEXT_WEIGHT)
+        content = {w for w in weight if w not in GENERIC and w not in WORDING and w not in STOP}
         score = {}
         for f in fams:
             s = 0.0
             for w in content & vocab[f]:
                 spread = sum(1 for g in fams if w in vocab[g])
                 if spread <= INFER_SPREAD:
-                    s += 1.0 / spread
+                    s += weight[w] / spread
             score[f] = s
         ranked = sorted(score.items(), key=lambda kv: (-kv[1], kv[0]))
         if not ranked or ranked[0][1] < INFER_MIN:
@@ -1671,7 +1688,7 @@ FAMILIES = [
 # happens to be called "Standard").
 DEFAULT_TIER = set("standard regular normal basic ongoing purchase".split())
 # "new" and "used" describe the vehicle, not a separate loan product: the auto rows price them by model year.
-NOT_A_MODIFIER = DEFAULT_TIER | {"new", "used"}
+NOT_A_MODIFIER = DEFAULT_TIER | {"new", "used", "unsecured"}   # personal loans are unsecured
 
 # Article facts for conflicts (D10). Organisation-wide statements only: "It has ... 22 branch office
 # locations" (the newsroom boilerplate) and "Dupaco now operates 22 branches", not "Dupaco's 18 branches"

@@ -554,3 +554,29 @@ Checks:
 - 0 stale traps on every set.
 - Gate scripts: 36/36, `--sixth` 41/41, `--determinism` 37/37.
 - Conflicts: F1 0.759, resolution 1.0, 0/8 negatives.
+
+From here the decision number is the mean over 10 sets: the 9 above plus sealed set 4 (spent). Baseline at step 7: **0.8839** (set 4 0.6398, 1 stale trap).
+
+**Step 8: the vocabulary and term gaps set 4 found.** Kept.
+- **New synonyms:**
+  - "promo" means special ("the 17-month promo CD"); "promotional" APRs are left alone.
+  - "biz" means business.
+  - "settlement costs" means closing costs.
+  - "half-year" means 6 months.
+- **Ruled-out spellings:** "non jumbo" with a space now rules out jumbo, as "non-jumbo" did.
+- **Address words:** "satnav" and "maps" join the address words.
+- **"Unsecured" isn't a product modifier:** personal loans are unsecured.
+- **Several terms in one question.** In "36 and 48 months" or "12 or 24-month", the unit applies to every number. A row of any one of the asked terms answers its half. Before, every term had to be in one row, so neither row passed.
+- **Context words count less when inferring a family.** Words from the other sentences now count at CONTEXT_WEIGHT (0.2) there too. "I am checking an old offer" tied Checking with Certificate.
+- **Rejected:** "promotional" as special too. It gave other families' rows the word "special", and two certificate-special questions lost their family.
+- **New dev-set loss:** set 4's "may 18 2026 non jumbo 25mo special cert apy pls" now refuses. Before, it gave the jumbo value, a stale trap.
+
+| | Public | Reworded | Must-refuse | Chatty | Inline | Context | Shape | S1 | S2 | S3 | S4 | Mean (10) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Step 7 | 0.9643 | 0.8713 | 18/18 | 0.9506 | 0.8326 | 0.9947 | 1.0 | 0.8247 | 0.8974 | 0.8634 | 0.6398 | 0.8839 |
+| Step 8 | 0.9643 | 0.8713 | 18/18 | 0.9506 | 0.8326 | 0.9947 | 1.0 | 0.8247 | **0.9314** | 0.8634 | **0.7819** | **0.9015** |
+
+Checks:
+- 0 stale traps on every set.
+- Gate scripts: 36/36, `--sixth` 41/41, `--determinism` 37/37.
+- Conflicts: F1 0.759, resolution 1.0, 0/8 negatives.

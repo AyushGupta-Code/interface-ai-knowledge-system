@@ -408,3 +408,9 @@ Q5 done. GLOSSARY.md is untracked and gitignored (kept locally), and the links t
 ## Repo cleanup before submission (2026-11-15)
 
 Removed from the repo (all still in the git history, none confidential): `PRD.md` (one-page spec, superseded by NOTES.md), `dev/BUILD_REPORT.md` (a mid-build snapshot of scores, superseded by this file), `dev/REFUSAL_TRACE.md` (an early diagnosis; the code comment and the two mentions above now describe it instead of linking), and `Knowledge-Hackathon-Assignment.pdf` (the organizers' brief; kept locally and gitignored). README.md, which was the kit's brief, is now our own front page: results, how to run, and what's where. NOTES.md no longer says Python 3.11 is unverified, and it records the dropped embedding experiment. Checks: public 0.8868, 0 stale traps, 0 errors; `check_finishing_gates.py` 36/36; no remaining links to removed files (`git grep`).
+
+## Fourth untouched test set (2026-11-15)
+
+Written by a fresh Codex session, told not to open submission/, any of dev/, PLAN.md, NOTES.md, README.md, results/ or anything under /tmp, and not to run the system. 36 questions: 4 per category; 18 public rewordings, 14 new facts, 4 refusals; styles 9 plain, 9 vocabulary, 9 conversational, 9 messy; 6 paraphrase groups; at least 4 historical, 3 two-fact, 3 ruled-out-product, 3 tier and 3 branch questions. Local only (`.git/info/exclude`): `dev/untouched4_eval.jsonl`, `dev/untouched4_evidence.md`.
+
+Seal: `sha256sum dev/untouched4_eval.jsonl` → `299fd9285877969324d6c68d01a54b111680a31576419ad2789cc5392fb50033`, recorded before any run. Key check without running the system (every must_include value is in the snapshot the question's date selects and on its expected source page; no must_not_include value overlaps the key): 36/36 OK. Plan: run it once on the current commit (aggregate only, no items read) and once after the next round, with no fixes between them that come from reading it.

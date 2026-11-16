@@ -1,6 +1,6 @@
 # Research findings
 
-Where each public answer and each Forbidden value lives, and what that means for the build. Terms are defined in [GLOSSARY.md](../GLOSSARY.md).
+Where each public answer and each Forbidden value lives, and what that means for the build.
 
 How it was produced: `python3 dev/research_map.py > <scratch>/map.txt` (about 3 min). For each question it lists the pages in the target Snapshot holding each required value, and every page in every Snapshot holding each Forbidden value, using the scorer's own `contains()` rule. The output quotes site text, so it stays out of git.
 

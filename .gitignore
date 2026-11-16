@@ -15,3 +15,6 @@ hackathon-knowledge-kit-participant.zip
 
 # supplied website snapshots: must stay out of the public repo
 snapshots_zip/
+
+# local working glossary: kept out of the public repo
+GLOSSARY.md

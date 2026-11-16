@@ -650,3 +650,14 @@ Checks: 0 stale traps; p95 0.65 s; gates 36/36, 41/41, 37/37; conflicts F1 0.758
 | Step 12 | 0.9643 | 0.8713 | 18/18 | 0.9506 | **0.8558** | **1.0** | 1.0 | **0.8569** | **0.9365** | 0.8634 | **0.8177** | **0.9111** | **0.9116** |
 
 Checks: 0 stale traps; p95 0.70 s; gates 36/36, 41/41, 37/37; conflicts F1 0.7586, resolution 1.0, 0/8 negatives.
+
+**Step 13: list questions prefer the passage that lists, and a page is also named by its address.** Kept.
+- **A passage naming several products wins a list question.** For "list all three business checking options" or "which three money market options", passing passages tied, and a footnote came first. When the question asks for several options, types, accounts, cards or products, the passage with the longest list of names ("Business Free Checking, Business 1st Rate Checking and Business Analysis Checking") now ranks first, after page authority.
+- **A page's address counts as part of its title.** "On the personal savings page" now matches /personal/savings-account, whose title is "Best Ways to Save Money". Only for rate, product and other pages.
+- **Named, mentioned, listed** are no longer used as the question's required word.
+
+| | Public | Reworded | Must-refuse | Chatty | Inline | Context | Shape | S1 | S2 | S3 | S4 | S5 | Mean (11) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Step 13 | 0.9643 | 0.8713 | 18/18 | 0.9506 | 0.8558 | 1.0 | 1.0 | 0.8569 | 0.9365 | 0.8634 | **0.8315** | **0.9248** | **0.9141** |
+
+Checks: 0 stale traps; p95 0.62 s; gates 36/36, 41/41, 37/37; conflicts F1 0.7586, resolution 1.0, 0/8 negatives.

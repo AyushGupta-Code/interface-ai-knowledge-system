@@ -334,7 +334,7 @@ def expand_providers(text: str) -> str:
 
 # Wording words: they say how the member phrased the question, not what it is about, so they can never
 # be the specific word (an early refusal trace found between, highest, list... chosen and causing refusals).
-WORDING = set("between highest lowest top best list".split())
+WORDING = set("between highest lowest top best list named mentioned listed".split())
 # Words naming the kind of answer wanted (a link, a page). They are read by answer_shape(), and are not
 # topic words: counting them diluted page coverage ("link to the location finder").
 ANSWER_KIND = set("link url website web page list site".split())
@@ -400,6 +400,9 @@ RULED_OUT_NUMBER = re.compile(r"\b(?:not|instead\s+of|rather\s+than|other\s+than
 SPACED_RATE = re.compile(r"(?<![\d.,$])\b\d\s\d\d\b(?![\d.,])(?!\s*(?:months?|years?|mos?|yrs?|monthly)\b)\s*%?", re.I)
 
 
+LIST_OF = re.compile(r"\b(?:list|all|every|which|what are|name)\b.*\b(?:options|types|kinds|accounts|cards|products|choices|plans)\b"
+                     r"|\b(?:two|three|four|five|six|both|[2-6])\s+(?:[\w-]+\s+){0,3}(?:options|types|kinds|accounts|cards|products|choices|plans)\b", re.I)
+ENUMERATION = re.compile(r"[A-Z][\w’'$-]*(?:\s+[A-Z0-9][\w’'$-]*)*(?:,\s+(?:\[)?[A-Z][\w’'$-]*(?:\s+[A-Z0-9][\w’'$-]*)*(?:\]\([^)]*\))?)+,?\s+(?:and|or)\s+[A-Z][\w’'$-]*(?:\s+[A-Z0-9][\w’'$-]*)*")
 COUNT_OF_ASKED = re.compile(r"\b\d\s+(?:\w+\s+)?(?:things|ways|reasons|options|choices|items|steps|types|kinds|"
                             r"conditions|requirements|rules|parts|facts|values|names|products|accounts)\b", re.I)
 
@@ -615,7 +618,9 @@ class KnowledgeBase:
             date = article_date(lines) if kind == "article" else ""
             title = re.sub(r"\s*\|\s*Dupaco.*$", "", page.title or "")
             pg = len(self.pages)
-            title_toks, page_toks, page_shapes = frozenset(tokens(title)), set(tokens(title)), set()
+            # A product page is also named by its address ("the personal savings page" is /personal/savings-account)
+            path = " ".join(re.split(r"[/_-]+", urlparse(page.url).path)) if kind in ("rates", "product", "other") else ""
+            title_toks, page_toks, page_shapes = frozenset(tokens(f"{title} {path}")), set(tokens(f"{title} {path}")), set()
             for text, table, caption, cells in split_page(page.markdown):
                 text = clean(text)
                 if table >= 0:
@@ -951,7 +956,18 @@ class KnowledgeBase:
             p = self.passages[pid]
             about = round(sum(idf[w] for w in sorted((words - GENERIC) & self.pages[p.page][0])) / total, 2)
             newest_first = (_neg(p.date) if p.date else "~") if p.kind == "article" else ""
-            return (KIND_RANK[p.kind], other_segment(pid), -about, newest_first, -round(score[pid], 2), p.url, pid)
+            return (KIND_RANK[p.kind], other_segment(pid), -enumerated(pid), -about, newest_first,
+                    -round(score[pid], 2), p.url, pid)
+
+        list_asked = bool(LIST_OF.search(message or question))
+
+        def enumerated(pid):
+            # "Which three money market options…": among passing passages, the one naming the most
+            # products in a list ("Investor's Choice, Achieve and High-Yield Savings") answers it.
+            if not list_asked:
+                return 0
+            return max((len(re.findall(r"[A-Z][\w’'$-]*(?:\s+[A-Z0-9][\w’'$-]*)*", m)) for m in
+                        ENUMERATION.findall(self.passages[pid].text)), default=0)
 
         wanted_segment = "Business" if re.search(r"\bbusiness\b", question, re.I) else "Personal"
 

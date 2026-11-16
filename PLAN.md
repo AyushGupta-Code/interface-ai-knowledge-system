@@ -462,3 +462,16 @@ Checks:
 - 0 stale traps on every set.
 - Gate scripts: 36/36, `--sixth` 41/41, `--determinism` 37/37.
 - Conflicts: F1 0.759, resolution 1.0, 0/8 negatives.
+
+**Step 3: address words describe the answer.** Kept.
+- **What was wrong.** For an address question, "street", "ZIP", "address", "location" and "navigation" were scored as subject words. The site's address lines ("185 Peosta St., Peosta, IA, 52068") contain none of them, so the right line fell under the 0.35 score floor and the question was refused. These words are now dropped from an address question, as "link" and "page" already are for link questions.
+- **Rejected: lower-case words the site writes as names.** "peosta" and "galena" are capitalised in at least 80% of their uses, so they could be kept as names. On its own this gave mean 0.8572 and pushed p95 to 2.4 s (a scan per word). Together with the address change it gave 0.8621, below the address change alone.
+
+| | Public | Reworded | Must-refuse | Chatty | Inline | Context | Shape | S1 | S2 | S3 | Mean |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Step 3 | 0.8868 | 0.8675 | 18/18 | 0.8984 | 0.7783 | 0.9947 | 0.9333 | **0.7794** | 0.8613 | **0.7637** | **0.8626** |
+
+Checks:
+- 0 stale traps on every set.
+- Gate scripts: 36/36, `--sixth` 41/41, `--determinism` 37/37.
+- Conflicts: F1 0.759, resolution 1.0, 0/8 negatives.

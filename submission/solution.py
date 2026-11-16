@@ -304,6 +304,9 @@ WORDING = set("between highest lowest top best list".split())
 # Words naming the kind of answer wanted (a link, a page). They are read by answer_shape(), and are not
 # topic words: counting them diluted page coverage ("link to the location finder").
 ANSWER_KIND = set("link url website web page list site".split())
+# For an address question, words naming the parts of an address describe the answer, not the place:
+# "185 Peosta St., Peosta, IA, 52068" says neither "street" nor "ZIP".
+ADDRESS_KIND = {stem(w) for w in "address addresses street zip zipcode postal code located location navigation gps".split()}
 # "Do all branches keep the same lobby hours?": a comparison across branches, not one branch's hours.
 COMPARE = re.compile(r"\b(?:same|identical|differ(?:ent|s)?|vary|varies|consistent|uniform)\b", re.I)
 HOURS_WORD = re.compile(r"\b(?:hours?|times?|schedules?|open(?:ing)?|clos(?:e|es|ing))\b", re.I)
@@ -680,6 +683,8 @@ class KnowledgeBase:
         qtoks = tokens(question) - ANSWER_KIND - negated
         qnums = question_numbers(message or question)   # "I'm buying a 2025 car. What APR...?"
         shape = answer_shape(question)
+        if shape == "address":
+            qtoks = (qtoks - ADDRESS_KIND) or qtoks
         tr.update(qtoks=qtoks, qnums=qnums, shape=shape)
         if not qtoks:
             return Answer(text=REFUSAL, confident=False)

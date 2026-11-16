@@ -385,3 +385,18 @@ Checks: context 0.7842 → 0.9947; no public, reworded, must-refuse, chatty, inl
 ## Python 3.11 verified (2026-11-15)
 
 Installed `uv` 0.13.8 (`~/.local/bin`, shell profile untouched) and a Python 3.11.18 environment outside the repo (`~/.venvs/interface-311`). With the standard-library-only solution, on 3.11: public 0.8868, reworded 0.8675, must-refuse 1.0, practice 1.0, 0 errors, 0 stale traps; `check_finishing_gates.py` 36/36. One answer differed from 3.14 (dup-008): `urljoin` keeps an empty fragment ("…/savings-account#") on 3.14 and drops it on 3.11. `d8b7de8` strips it; after that every public, reworded and must-refuse answer is byte-identical on 3.11 and 3.14 (`results/pycmp/`). `--sixth` on 3.11: one run reported 40/41 while other checks ran; four further runs 41/41; the failing check was not printed and did not reproduce.
+
+## Embedding experiment, tried and dropped (2026-11-15)
+
+Tried `potion-base-8M` (model2vec, MIT, 30 MB, CPU only) in the Python 3.11 environment, run against public, reworded, must-refuse, chatty and inline (`sets2.sh` in the scratchpad, one run per setting):
+
+| How it was used | Public | Reworded | Must-refuse | Chatty | Inline |
+|---|---|---|---|---|---|
+| Not used | 0.8868 | 0.8675 | 1.0 | 0.8984 | 0.7783 |
+| Added to the match score, weight 0.1 | 0.8072 | 0.7861 | 1.0 | 0.7998 | 0.6987 |
+| Added to the match score, weight 0.03 | 0.8072 | 0.7712 | 1.0 | 0.8171 | 0.6987 |
+| Only to break near-ties in ranking | 0.8868 | 0.881 | 1.0 | 0.8973 | 0.776 |
+
+Added to the score, loosely related blog text drew level with the rate rows. As a tie-breaker, only three scores moved: one reworded question gained (Hy-Vee branch members), and two padded routing-number questions lost their source credit. Ingest went from 47 s to 64 s.
+
+**Decision: dropped.** The remaining misses happen before ranking (the right passage is never a candidate, or a rule rejects it), which re-ranking can't fix. One question isn't worth two dependencies and a 30 MB model, and the system stays standard library only. Code reverted, model deleted; public after the revert: 0.8868.

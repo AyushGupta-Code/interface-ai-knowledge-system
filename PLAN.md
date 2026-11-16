@@ -414,3 +414,35 @@ Removed from the repo (all still in the git history, none confidential): `PRD.md
 Written by a fresh Codex session, told not to open submission/, any of dev/, PLAN.md, NOTES.md, README.md, results/ or anything under /tmp, and not to run the system. 36 questions: 4 per category; 18 public rewordings, 14 new facts, 4 refusals; styles 9 plain, 9 vocabulary, 9 conversational, 9 messy; 6 paraphrase groups; at least 4 historical, 3 two-fact, 3 ruled-out-product, 3 tier and 3 branch questions. Local only (`.git/info/exclude`): `dev/untouched4_eval.jsonl`, `dev/untouched4_evidence.md`.
 
 Seal: `sha256sum dev/untouched4_eval.jsonl` → `299fd9285877969324d6c68d01a54b111680a31576419ad2789cc5392fb50033`, recorded before any run. Key check without running the system (every must_include value is in the snapshot the question's date selects and on its expected source page; no must_not_include value overlaps the key): 36/36 OK. Plan: run it once on the current commit (aggregate only, no items read) and once after the next round, with no fixes between them that come from reading it.
+
+## Answer-more round (2026-11-15)
+
+Goal: refuse fewer answerable questions. The scorer gives 0 to a wrong refusal exactly as to a wrong answer, and only about 1 question in 9 should be refused, yet every sealed-set diagnosis found answerable questions refused. Sealed sets 1–3 are spent, so they are now development sets. Sealed set 4 is the judge (baseline on `560a225`, aggregate only: **0.5192**, 0 stale traps).
+
+Decision number per step: the mean final score over 9 sets (public, reworded, chatty, inline, context, shape, sealed 1–3). A step is kept only if:
+- the mean rises
+- public doesn't fall and has 0 stale traps
+- must-refuse stays at 15/18 or better
+- conflicts and all gate scripts hold
+
+Baseline `560a225`: public 0.8868, reworded 0.8675, must-refuse 18/18, chatty 0.8984, inline 0.7783, context 0.9947, shape 0.9333, sealed 1 0.5766, sealed 2 0.7313, sealed 3 0.7177; **mean 0.8205**.
+
+**Tried first and dropped: required word as a penalty, not a veto.** A passage missing the required word scored ×0.3, ×0.5 or ×0.7 instead of being rejected. Not a single answer changed at any of the three settings. The trace (`dev/trace_refusals.py --all` on sealed 1–3) showed why: the rate refusals happen earlier, before the required word is checked.
+
+**Step 1: find the product family of a rate question that doesn't name it.** Kept.
+- **What was wrong.** "The 17-month fixed jumbo special" and "a 15-year fixed conventional home purchase" name no family word, so the rule "a rate question with no family refuses" fired.
+- **The fix.** Such a question now takes the family whose rate rows use its distinctive words. A word counts only if at most 3 families' rows use it, weighted 1/(number of families using it). The best family needs a score of at least 1, and the runner-up must score below 0.6 of it. IRA is never inferred: it wraps certificates and savings, so only a question that says IRA asks for one.
+- **Settings tried** (the setting and the mean it gave): spread ≤ 5 gave 0.8350; runner-up ratio 0.8 gave 0.8386; minimum 0.5 gave 0.8386. The chosen settings gave 0.8386.
+- **"New" and "used" don't refuse.** They describe the vehicle, and the auto rows price it by model year. Before, "a 2024 used car" refused because "used" was read as an unknown product modifier.
+- **Rejected:** accepting any modifier that the family's own pages use. It answered three must-refuse questions ("no penalty CD", "Bitcoin staking savings", "interest-only mortgage"), because "penalty", "staking" and "only" appear on those pages in other senses.
+
+| | Public | Reworded | Must-refuse | Chatty | Inline | Context | Shape | S1 | S2 | S3 | Mean |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Baseline | 0.8868 | 0.8675 | 18/18 | 0.8984 | 0.7783 | 0.9947 | 0.9333 | 0.5766 | 0.7313 | 0.7177 | 0.8205 |
+| Step 1 | 0.8868 | 0.8675 | 18/18 | 0.8984 | 0.7783 | 0.9947 | 0.9333 | **0.6985** | **0.7933** | **0.7467** | **0.8442** |
+
+Checks:
+- 0 stale traps on every set.
+- Gate scripts: 36/36, `--sixth` 41/41, `--determinism` 37/37.
+- Conflicts: F1 0.759, resolution 1.0, 0/8 negatives.
+- p95 under 0.6 s with ten suites running in parallel.

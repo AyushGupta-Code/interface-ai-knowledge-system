@@ -275,6 +275,9 @@ CONTEXT_WEIGHT = 0.2
 # next ANCHOR_RETRIES rarest words are also tried as the required word. A name the member capitalised
 # ("Mullan", "Chicago") is never dropped, so a branch the site has no hours for still refuses.
 ANCHOR_RETRIES = 2
+INFER_SPREAD = 3   # a word at most this many families' rows use still points to a family
+INFER_MIN = 1.0   # the inferred family needs at least one distinctive word (or several shared ones)
+INFER_RATIO = 0.6   # and the runner-up must score below this share of it
 BUNDLE_MARGIN = 0.15   # same margin as the candidate cutoff: passages this close are equally good evidence
 
 
@@ -711,7 +714,8 @@ class KnowledgeBase:
         if shape == "rate":
             # A rate question naming a product family the site publishes rates for: the family check below
             # decides which rows answer, so other words of the question can't make every page fall short.
-            fam = _family_of(canonical(question)) or _family_of(canonical(message or question))
+            fam = (_family_of(canonical(question)) or _family_of(canonical(message or question))
+                   or self._infer_family(qtoks | ctx, si))
             by_family = self._family_index()[si][0] if fam else {}
             fam_pages = {self.passages[pid].page for f in by_family if f == fam or CATEGORY.get(f) == fam
                          for pid in by_family[f]}
@@ -739,7 +743,8 @@ class KnowledgeBase:
         # a modifier or feature that only a sibling product has ("introductory" on the Rewards Visa), or
         # that no row of the family has ("reverse", "interest-only" mortgage, "Unicorn" Savings), refuses.
         fam_rows, required = None, set()
-        qfam = (_family_of(canonical(question)) or _family_of(canonical(message or question))) if shape == "rate" else ""
+        qfam = (_family_of(canonical(question)) or _family_of(canonical(message or question))
+                or self._infer_family(qtoks | ctx, si)) if shape == "rate" else ""
         tr["family"] = qfam
         if shape == "rate" and not qfam:
             # A rate for a product the site has no rate family for (construction, payday, student loans).
@@ -1199,6 +1204,29 @@ class KnowledgeBase:
             self._fam_index = fams
         return self._fam_index
 
+    def _infer_family(self, words, si) -> str:
+        """A rate question that doesn't name its product ("the 17-month jumbo special", "a 15-year fixed
+        conventional purchase"): the family whose rate rows use the question's distinctive words, when
+        exactly one family is clearly best. Words that most families' rows use don't count."""
+        by_family, vocab = self._family_index()[si]
+        # An IRA is an account wrapper around certificates and savings: only a question that says so asks for one.
+        fams = [f for f in by_family if by_family[f] and f != "IRA"]
+        content = {w for w in words if w not in GENERIC and w not in WORDING and w not in STOP}
+        score = {}
+        for f in fams:
+            s = 0.0
+            for w in content & vocab[f]:
+                spread = sum(1 for g in fams if w in vocab[g])
+                if spread <= INFER_SPREAD:
+                    s += 1.0 / spread
+            score[f] = s
+        ranked = sorted(score.items(), key=lambda kv: (-kv[1], kv[0]))
+        if not ranked or ranked[0][1] < INFER_MIN:
+            return ""
+        if len(ranked) > 1 and ranked[1][1] >= INFER_RATIO * ranked[0][1]:
+            return ""
+        return ranked[0][0]
+
     def _same_fact_pages(self, row_ids, cited: str, limit: int = 5) -> list[str]:
         """Other rate and product pages in the same snapshot that state every quoted row as the same
         fact (same product, tier/term and values, by the conflict identity of D10)."""
@@ -1518,6 +1546,8 @@ FAMILIES = [
 # never name a feature, so they are not checked against sibling products (the Rewards Visa's tier
 # happens to be called "Standard").
 DEFAULT_TIER = set("standard regular normal basic ongoing purchase".split())
+# "new" and "used" describe the vehicle, not a separate loan product: the auto rows price them by model year.
+NOT_A_MODIFIER = DEFAULT_TIER | {"new", "used"}
 
 # Article facts for conflicts (D10). Organisation-wide statements only: "It has ... 22 branch office
 # locations" (the newsroom boilerplate) and "Dupaco now operates 22 branches", not "Dupaco's 18 branches"
@@ -1542,7 +1572,7 @@ def _modifier(question: str, family: str) -> str:
                 return ""
             before = re.findall(r"[a-z]+", question[:m.start()].lower())
             w = stem(before[-1]) if before else ""
-            return "" if (not w or w in STOP or w in GENERIC or w in WORDING or w in DEFAULT_TIER or w in LIST_WORDS
+            return "" if (not w or w in STOP or w in GENERIC or w in WORDING or w in NOT_A_MODIFIER or w in LIST_WORDS
                           or len(w) < 2) else w
     return ""
 

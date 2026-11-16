@@ -18,13 +18,60 @@ The first runs of the sealed sets are the most realistic measure. After each run
 
 ## Run it
 
-The website snapshots belong to the credit union and are not in this repo. Put the kit's five snapshot zips in `snapshots_zip/`; the scorer unpacks them on its first run. Then, from the repo root:
+**You need:** Python 3.11 or newer. Nothing to install: `submission/requirements.txt` is empty on purpose.
+
+**1. Get the code.**
+
+```bash
+git clone https://github.com/AyushGupta-Code/interface-ai-knowledge-system.git
+cd interface-ai-knowledge-system
+```
+
+**2. Add the snapshots.** They belong to the credit union, so they are not in this repo. Copy the kit's five zips into `snapshots_zip/`:
+
+```
+snapshots_zip/01_2026-05-12_baseline.zip
+snapshots_zip/02_2026-05-19_recrawl.zip
+snapshots_zip/03_2026-06-09_recrawl.zip
+snapshots_zip/04_2026-08-27_rebaseline.zip
+snapshots_zip/05_2026-09-28_latest.zip
+```
+
+The scorer unpacks them into `snapshots/` on its first run. You can also unzip them there yourself.
+
+**3. Score it on the public eval.**
 
 ```bash
 python3 harness/run_eval.py --submission submission --eval eval/public_eval.jsonl
 ```
 
-Ingest takes about 25 seconds. After that, each answer takes a fraction of a second.
+To score another question set, pass its file to `--eval`, for example `--eval dev/paraphrase_eval.jsonl`. Loading the snapshots takes about 25 seconds. After that, each answer takes a fraction of a second.
+
+**4. Ask your own questions.** From the repo root:
+
+```python
+import sys
+from pathlib import Path
+sys.path[:0] = ["harness", "submission"]
+import run_eval, solution
+
+kb = solution.build()
+for snap in run_eval.load_snapshots(Path("snapshots")):
+    kb.ingest(snap)
+
+print(kb.answer("What is the APY on the 17-month certificate special?").text)        # today's value
+print(kb.answer("What is the 12-month certificate APY?", "2026-05-20").text)       # as of a date
+print(len(kb.conflicts()), "contradictions found")
+```
+
+**5. Optional: the checks run before every commit.**
+
+```bash
+python3 dev/check_conflicts.py                       # contradictions against the local answer key
+python3 dev/check_finishing_gates.py                 # dates, fallback to older snapshots, caching (36 checks)
+python3 dev/check_finishing_gates.py --sixth         # a sixth snapshot with one changed rate (41 checks)
+python3 dev/check_finishing_gates.py --determinism   # same answers in separate processes (37 checks)
+```
 
 ## What's where
 

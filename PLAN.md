@@ -617,3 +617,13 @@ Checks:
 - 0 stale traps on every set; p95 0.56 s.
 - Gate scripts: 36/36, `--sixth` 41/41, `--determinism` 37/37.
 - Conflicts: F1 0.7586, resolution 1.0, 0/8 negatives.
+
+**Step 10: "how many of its boxes" is a count of boxes.** Kept.
+- **What was wrong.** The count rule took the noun right after "how many". In "how many of its boxes are available", it found none, so any passage about boxes answered: the fee schedule's box sizes were given for a must-refuse question.
+- **The fix.** "How many of its / the / your / their / our / these / those X" now counts X. Only a passage stating a number of boxes can answer, and none does, so it refuses.
+
+| | Public | Reworded | Must-refuse | Chatty | Inline | Context | Shape | S1 | S2 | S3 | S4 | S5 | Mean (11) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Step 10 | 0.9643 | 0.8713 | 18/18 | 0.9506 | 0.8326 | 0.9947 | 1.0 | 0.8247 | 0.9314 | 0.8634 | 0.7819 | **0.8349** | **0.8954** |
+
+Checks: 0 stale traps; p95 0.68 s; gates 36/36, 41/41, 37/37; conflicts F1 0.7586, resolution 1.0, 0/8 negatives.

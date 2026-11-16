@@ -343,7 +343,7 @@ GENERAL_HOURS = {stem(w) for w in """lobby lobbies driveup drive up thru through
 SERVICE_SCHEDULE = re.compile(r"\*\*(Lobby|Drive-up)\*\*\s*·?\s*(.+)", re.I)
 # "How many staffed drive-up windows does the Galena branch have?": the counted thing is the last word
 # before the verb. A count answer must state a number of that thing ("22 branches", "two windows").
-COUNT_OF = re.compile(r"\bhow many\s+((?:[\w$'-]+\s+){0,4}?)(?:does|do|did|are|is|were|was|has|have|had|can|will|would"
+COUNT_OF = re.compile(r"\bhow many\s+(?:of\s+(?:its|the|your|their|our|these|those)\s+)?((?:[\w$'-]+\s+){0,4}?)(?:does|do|did|are|is|were|was|has|have|had|can|will|would"
                       r"|should|in|at|on|of|for|per|across)\b", re.I)
 NUMBER_WORD = (r"(?:\d[\d,]*|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|"
                r"fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|hundred|dozens?|several)")

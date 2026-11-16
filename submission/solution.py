@@ -99,6 +99,7 @@ SYNONYMS = [
     (r"\bholding\b", "balance"),
     (r"\bmaintenance (?:fees?|charges?)\b", "service fee"),   # the site says "monthly service fee"
     (r"\baccts?\b", "account"),
+    (r"\bexclud(?:e|es|ed|ing)\b|\bineligible\b|\bisn'?t eligible\b", "not eligible"),
     (r"\bclosures?\b", "closed"),
     (r"\b(?:mid|early|late)[- ]?(?=(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b)", ""),
 ]
@@ -766,7 +767,7 @@ class KnowledgeBase:
             routed = self._routing_answer(si, tr)
             if routed is not None:
                 return routed
-        compared = self._schedule_comparison(question, si, tr)
+        compared = self._schedule_comparison(question, si, tr, message)
         if compared is not None:
             return compared
         if shape in ("count", "any"):
@@ -1236,15 +1237,23 @@ class KnowledgeBase:
             cache[si] = dict(out)
         return cache[si]
 
-    def _schedule_comparison(self, question, si, trace):
+    def _schedule_comparison(self, question, si, trace, message=None):
         """"Are the lobby hours the same at every branch?": list each distinct published schedule, newest
         first, with the announcement it comes from. Says they differ only when two or more differ.
         Also "What are your lobby hours?" when no branch is named: the site publishes hours per branch, so
         the honest answer is the schedules it has published and a question about which branch."""
-        service = "drive-up" if re.search(r"\bdrive\b|drive-?up|drive-?thr", question, re.I) else "lobby"
+        whole = message or question
+        service = "drive-up" if re.search(r"\bdrive\b|drive-?up|drive-?thr", whole, re.I) else "lobby"
         compare = COMPARE.search(question) and HOURS_WORD.search(question) and MANY_PLACES.search(question)
-        general = (answer_shape(question) == "hours" and re.search(r"\blobb(?:y|ies)\b|\bdrive", question, re.I)
-                   and not tokens(question) - GENERIC - GENERAL_HOURS)
+        # "What are the drive-up hours?", also with the member's own words ("I was wondering…", "usual"):
+        # general when no other word could name a place: a capitalised name, or a word an hours or address
+        # passage on the site uses.
+        index = self.index[si]
+        named = tokens(" ".join(n for n in NAME_WORD.findall(" " + whole) if n != "Dupaco"))
+        other = {t for t in (tokens(question) | named) - GENERIC - GENERAL_HOURS
+                 if t in named or any(self.passages[pid].shapes & {"hours", "address"} for pid in index.get(t, ()))}
+        general = (answer_shape(question) == "hours" and re.search(r"\blobb(?:y|ies)\b|\bdrive", whole, re.I)
+                   and not other)
         if not (compare or general):
             return None
         found = self._schedule_index(si).get(service, {})

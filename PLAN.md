@@ -661,3 +661,14 @@ Checks: 0 stale traps; p95 0.70 s; gates 36/36, 41/41, 37/37; conflicts F1 0.758
 | Step 13 | 0.9643 | 0.8713 | 18/18 | 0.9506 | 0.8558 | 1.0 | 1.0 | 0.8569 | 0.9365 | 0.8634 | **0.8315** | **0.9248** | **0.9141** |
 
 Checks: 0 stale traps; p95 0.62 s; gates 36/36, 41/41, 37/37; conflicts F1 0.7586, resolution 1.0, 0/8 negatives.
+
+**Step 14: general hours questions with the member's own words, and "exclude" means not eligible.** Kept.
+- **General lobby and drive-up hours.** "What are the drive-up hours?" gets every published schedule and a question about which branch. "I was wondering, what are the drive-up hours at the moment?" and "I'd like to visit a Dupaco lobby. What are its usual opening hours?" used to refuse or get an article, because any extra word made the question specific. Now it's general unless another word could name a place: a capitalised name, or a word that an hours or address passage on the site uses. "Lobby hours at Galena" stays specific. The lobby/drive-up word may come from the member's other sentences.
+- **Rejected first: checking the words of the member's other sentences too.** "Appreciate the help" made two chatty questions specific, and they lost their source credit.
+- **"Exclude", "ineligible" and "isn't eligible"** now match the site's "not eligible".
+
+| | Public | Reworded | Must-refuse | Chatty | Inline | Context | Shape | S1 | S2 | S3 | S4 | S5 | Mean (11) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Step 14 | 0.9643 | 0.8713 | 18/18 | 0.9506 | **0.8868** | 1.0 | 1.0 | 0.8569 | 0.9365 | 0.8634 | **0.8556** | **0.9417** | **0.9206** |
+
+Checks: 0 stale traps; p95 0.65 s; gates 36/36, 41/41, 37/37; conflicts F1 0.7586, resolution 1.0, 0/8 negatives.

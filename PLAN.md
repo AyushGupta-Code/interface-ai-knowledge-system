@@ -400,3 +400,7 @@ Tried `potion-base-8M` (model2vec, MIT, 30 MB, CPU only) in the Python 3.11 envi
 Added to the score, loosely related blog text drew level with the rate rows. As a tie-breaker, only three scores moved: one reworded question gained (Hy-Vee branch members), and two padded routing-number questions lost their source credit. Ingest went from 47 s to 64 s.
 
 **Decision: dropped.** The remaining misses happen before ranking (the right passage is never a candidate, or a rule rejects it), which re-ranking can't fix. One question isn't worth two dependencies and a 30 MB model, and the system stays standard library only. Code reverted, model deleted; public after the revert: 0.8868.
+
+## GLOSSARY.md removed from the history (2026-11-15)
+
+Q5 done. GLOSSARY.md is untracked and gitignored (kept locally), and the links to it in PLAN.md and dev/RESEARCH.md are gone. The history was rewritten with `git filter-branch --prune-empty --index-filter 'git rm --cached --ignore-unmatch GLOSSARY.md' -- main`: 69 commits became 68, because the commit that only added the glossary was dropped. Checks: `git log main -- GLOSSARY.md` is empty; no commit's tree contains GLOSSARY.md, the supplied snapshots, `.env` or the sealed sets; the final tree is identical to the pre-rewrite tip. A backup bundle of the old history is outside the repo. Force-pushed to origin/main.

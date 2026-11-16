@@ -278,6 +278,8 @@ CONTEXT_WEIGHT = 0.2
 # ("Mullan", "Chicago") is never dropped, so a branch the site has no hours for still refuses.
 ANCHOR_RETRIES = 2
 REQ_PENALTY = 0.5   # a family word missing from a rate row (not a row-label word) halves its score
+# A markdown link's address: "[Continue](https://…/hometart-grants#)" says "Continue", not "hometart".
+LINK_TARGET = re.compile(r"\]\((?:https?://|/)[^)\s]*\)")
 INFER_SPREAD = 3   # a word at most this many families' rows use still points to a family
 INFER_MIN = 1.0   # the inferred family needs at least one distinctive word (or several shared ones)
 INFER_RATIO = 0.6   # and the runner-up must score below this share of it
@@ -568,7 +570,10 @@ class KnowledgeBase:
                     continue   # a web form's country picker ("Afghanistan +93 · Albania +355 ..."), not content
                 if len(text) < 3:
                     continue
-                toks = frozenset(tokens(f"{caption} {text}"))
+                # A link's address is not what the passage says ("[Continue](…/hometart-grants#) Cancel"
+                # would otherwise match a Home$tart question); its label is.
+                said = LINK_TARGET.sub("]", f"{caption} {text}")
+                toks = frozenset(tokens(said))
                 shapes = passage_shapes(kind, text, cells if table >= 0 else ())
                 p = Passage(si, page.url, title, kind, date, text, toks, pg, shapes, table, label, cells, caption)
                 pid = len(self.passages)

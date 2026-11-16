@@ -475,3 +475,17 @@ Checks:
 - 0 stale traps on every set.
 - Gate scripts: 36/36, `--sixth` 41/41, `--determinism` 37/37.
 - Conflicts: F1 0.759, resolution 1.0, 0/8 negatives.
+
+**Step 4: a link's address is not what a passage says.** Kept.
+- **What was wrong.** Passage words included the addresses of markdown links, in the passage and in its heading context. So "[Continue](…/first-time-homebuyers-…-hometart-grants#) Cancel" and "[Keep reading](…hometart…)" matched a Home$tart question as well as the article did. They won, and the $15,000 sentence never showed.
+- **The fix.** Link addresses are dropped before words are counted; the link labels stay. The Home$tart amount is now found (sealed 2 and 3, and shape-06). A Learning Lab hours question now reaches its article.
+- **Rejected: also dropping article teasers** (a cut copy ending in "..." above a "Keep reading" link). It lost the Learning Lab item: mean 0.8747, against 0.8772 without it.
+
+| | Public | Reworded | Must-refuse | Chatty | Inline | Context | Shape | S1 | S2 | S3 | Mean |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Step 4 | 0.8868 | 0.8694 | 18/18 | 0.8984 | 0.7783 | 0.9947 | **1.0** | 0.7794 | **0.8974** | **0.7900** | **0.8772** |
+
+Checks:
+- 0 stale traps on every set.
+- Gate scripts: 36/36, `--sixth` 41/41, `--determinism` 37/37.
+- Conflicts: F1 0.759, resolution 1.0, 0/8 negatives.

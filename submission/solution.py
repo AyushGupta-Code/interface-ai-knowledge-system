@@ -404,6 +404,8 @@ SPACED_RATE = re.compile(r"(?<![\d.,$])\b\d\s\d\d\b(?![\d.,])(?!\s*(?:months?|ye
 LIST_OF = re.compile(r"\b(?:list|all|every|which|what are|name)\b.*\b(?:options|types|kinds|accounts|cards|products|choices|plans)\b"
                      r"|\b(?:two|three|four|five|six|both|[2-6])\s+(?:[\w-]+\s+){0,3}(?:options|types|kinds|accounts|cards|products|choices|plans)\b", re.I)
 ENUMERATION = re.compile(r"[A-Z][\w’'$-]*(?:\s+[A-Z0-9][\w’'$-]*)*(?:,\s+(?:\[)?[A-Z][\w’'$-]*(?:\s+[A-Z0-9][\w’'$-]*)*(?:\]\([^)]*\))?)+,?\s+(?:and|or)\s+[A-Z][\w’'$-]*(?:\s+[A-Z0-9][\w’'$-]*)*")
+CALENDAR_WORDS = {stem(w) for w in """january february march april may june july august september october november december
+    jan feb mar apr jun jul aug sep sept oct nov dec monday tuesday wednesday thursday friday saturday sunday""".split()}
 COUNT_OF_ASKED = re.compile(r"\b\d\s+(?:\w+\s+)?(?:things|ways|reasons|options|choices|items|steps|types|kinds|"
                             r"conditions|requirements|rules|parts|facts|values|names|products|accounts)\b", re.I)
 
@@ -890,6 +892,8 @@ class KnowledgeBase:
                 title_toks = self.pages[p.page][0]
                 if anchor and anchor not in p.toks and anchor not in title_toks:
                     continue
+                if fam_rows is None and must_name - self.pages[p.page][1]:
+                    continue   # "the Galena branch building": a page about another building isn't an answer
                 factor = 1.0
                 if fam_rows is not None:
                     if pid not in fam_rows or negated & p.toks:   # "non-jumbo": not the jumbo rows
@@ -914,6 +918,10 @@ class KnowledgeBase:
         # The best-covered pages first; if none of them holds a passing passage, every page that still
         # covers half the question (a refusal only when nothing on the site passes the checks).
         names = tokens(" ".join(NAME_WORD.findall(" " + (message or question))))
+        # A place or product the member names that the site knows must be in the answer.
+        must_name = {t for t in names & qtoks if t in index and t not in GENERIC and t not in STOP
+                     and t not in CALENDAR_WORDS}
+        tr["must_name"] = sorted(must_name)
         def run():
             pages = {pg for pg, c in pcov.items() if c >= 0.75 * best_page}
             score, cutoff, cands = search(pages)
@@ -979,6 +987,12 @@ class KnowledgeBase:
         win_id = min(cands, key=rank)
         tr["winner"] = win_id
         win = self.passages[win_id]
+        if (win.kind in ("article", "file") and specific and anchor != specific[0] and anchor not in names
+                and _family_of(canonical(message or question))):
+            # "rewards visa: lowest FICO score to get approved": the product's own pages don't say, and the
+            # question's most specific word found nothing. A blog post matching its other words isn't an answer.
+            tr["refused_off_anchor"] = specific[0]
+            return Answer(text=REFUSAL, confident=False)
         if KIND_RANK[win.kind] >= KIND_RANK["calculator"]:
             # Only a blog post or calculator matched a "how do I change..." question: the site doesn't
             # describe the steps, so give the verified way to reach Dupaco instead of a loosely related article.
@@ -1532,8 +1546,10 @@ class KnowledgeBase:
     def _article_answer(self, question: str, si: int, trace: dict):
         """Answer only recognized organisation-count or named award-program predicates."""
         words = tokens(DATE_SPAN.sub(" ", question))
+        counted = COUNT_OF.search(question)
+        noun = stem(re.sub(r"[^a-z]", "", counted.group(1).split()[-1].lower())) if counted and counted.group(1).split() else ""
         branch = bool(re.search(r"how many|number of|count of", question, re.I)
-                      and "branch" in words)
+                      and "branch" in words and noun in ("", "branch", "office", "location"))   # not "how many square feet"
         recognition = bool(words & tokens("recognition recognized received awards ranked ranking won times"))
         if not branch and not recognition:
             return None

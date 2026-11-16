@@ -672,3 +672,17 @@ Checks: 0 stale traps; p95 0.62 s; gates 36/36, 41/41, 37/37; conflicts F1 0.758
 | Step 14 | 0.9643 | 0.8713 | 18/18 | 0.9506 | **0.8868** | 1.0 | 1.0 | 0.8569 | 0.9365 | 0.8634 | **0.8556** | **0.9417** | **0.9206** |
 
 Checks: 0 stale traps; p95 0.65 s; gates 36/36, 41/41, 37/37; conflicts F1 0.7586, resolution 1.0, 0/8 negatives.
+
+**Step 15: refuse for named reasons, so two must-refuse questions stop answering.** Kept.
+- **A place or product the member names must be on the answer's page.** "I found the Galena office address. How many square feet is that branch building?" got a news story about another building's square feet. A capitalised name from the question that the site uses now has to appear on the page of the answering passage. It doesn't have to be in the passage itself: the Waukee hours sit in an announcement that names Waukee in another paragraph. Month and weekday names don't count.
+- **A branch count counts branches.** "How many square feet is that branch…" was a branch-count question because it said "how many" and "branch". The counted noun now has to be branch, office or location, or missing.
+- **A product question doesn't take a blog post matched on its other words.** "rewards visa whats the lowest fico score needed to get approved": no product page states it. "fico", the most specific word, found nothing, so the required word moved to "approved" and a staff profile answered. When the question names a product family, the required word had to move, and only an article or file answers, it now refuses.
+- **Rejected first:**
+  - **The name in the passage itself.** This lost the Waukee and Platteville hours questions.
+  - **Counting month and weekday names as names.** This lost the Hy-Vee "this October" question.
+
+| | Public | Reworded | Must-refuse | Chatty | Inline | Context | Shape | S1 | S2 | S3 | S4 | S5 | Mean (11) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Step 15 | 0.9643 | 0.8713 | 18/18 | 0.9506 | 0.8868 | 1.0 | 1.0 | 0.8569 | 0.9365 | **0.8980** | **0.8879** | 0.9417 | **0.9267** |
+
+Checks: 0 stale traps; p95 0.78 s; gates 36/36, 41/41, 37/37; conflicts F1 0.7586, resolution 1.0, 0/8 negatives.

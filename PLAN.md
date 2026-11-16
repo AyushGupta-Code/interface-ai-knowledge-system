@@ -446,3 +446,19 @@ Checks:
 - Gate scripts: 36/36, `--sixth` 41/41, `--determinism` 37/37.
 - Conflicts: F1 0.759, resolution 1.0, 0/8 negatives.
 - p95 under 0.6 s with ten suites running in parallel.
+
+**Step 2: number words, and a family's own words only lower a row's score.** Kept.
+- **More spelled-out terms.** "nine", "sixty", "twenty-four", "eighty-four"… are now read as numbers, and "60 monthly payments" counts as a 60-month term.
+- **"Checking" the verb is not the product.** "I am checking an old offer" made a certificate question a Checking question.
+- **A family word missing from a row lowers its score.** Before, a word of the question that the family's rows use anywhere (a "Tier" column header, "model") had to be in the row. Now each missing word halves the row's score (×0.5).
+- **Words that name a row still must be in it.** Row-label words such as jumbo, Bright and Platinum must still be present, otherwise the row is another tier or product. The family's own name ("certificate") doesn't count as a row label.
+- **Rejected: every missing word as a penalty.** It answered two must-refuse questions with the wrong row: "36-month jumbo certificate" got the regular 36-month row, and "Bright Savings on $5,000,000" got Share Savings. That is why row-label words stayed strict. The penalty was ×0.5 and ×0.8 in those two runs, and both gave the same answers.
+
+| | Public | Reworded | Must-refuse | Chatty | Inline | Context | Shape | S1 | S2 | S3 | Mean |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Step 2 | 0.8868 | 0.8675 | 18/18 | 0.8984 | 0.7783 | 0.9947 | 0.9333 | **0.7344** | **0.8613** | 0.7467 | **0.8557** |
+
+Checks:
+- 0 stale traps on every set.
+- Gate scripts: 36/36, `--sixth` 41/41, `--determinism` 37/37.
+- Conflicts: F1 0.759, resolution 1.0, 0/8 negatives.

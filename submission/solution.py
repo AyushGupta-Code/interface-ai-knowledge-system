@@ -71,8 +71,10 @@ def article_date(lines: list[str]) -> str:
 
 # ---------------------------------------------------------------------------------------------
 # Text normalisation: member wording -> the site's wording (dev/RESEARCH.md §9), then tokens.
-WORD_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "ten": 10,
-                "fifteen": 15, "twenty": 20, "thirty": 30}
+WORD_NUMBERS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+                "ten": 10, "twelve": 12, "fifteen": 15, "eighteen": 18, "twenty": 20, "twenty-four": 24, "thirty": 30,
+                "thirty-six": 36, "forty-eight": 48, "sixty": 60, "seventy-two": 72, "eighty-four": 84}
+NUMBER_WORDS_RE = "|".join(sorted(WORD_NUMBERS, key=len, reverse=True))   # "twenty-four" before "twenty"
 SYNONYMS = [
     (r"\bshare certificates?\b", "certificate"),
     (r"\b(home|house) ?loans?\b", "mortgage"),
@@ -101,7 +103,7 @@ so too very let us see find info information""".split())
 
 def canonical(text: str) -> str:
     t = text.lower().replace("’", "'")
-    t = re.sub(r"\b(" + "|".join(WORD_NUMBERS) + r")\b", lambda m: str(WORD_NUMBERS[m.group(1)]), t)
+    t = re.sub(r"\b(" + NUMBER_WORDS_RE + r")\b", lambda m: str(WORD_NUMBERS[m.group(1)]), t)
     for pat, rep in SYNONYMS:
         t = re.sub(pat, rep, t)
     t = re.sub(r"\b(\d+)[- ]?(?:yr|year)s?\b", r"\1 year", t)
@@ -275,6 +277,7 @@ CONTEXT_WEIGHT = 0.2
 # next ANCHOR_RETRIES rarest words are also tried as the required word. A name the member capitalised
 # ("Mullan", "Chicago") is never dropped, so a branch the site has no hours for still refuses.
 ANCHOR_RETRIES = 2
+REQ_PENALTY = 0.5   # a family word missing from a rate row (not a row-label word) halves its score
 INFER_SPREAD = 3   # a word at most this many families' rows use still points to a family
 INFER_MIN = 1.0   # the inferred family needs at least one distinctive word (or several shared ones)
 INFER_RATIO = 0.6   # and the runner-up must score below this share of it
@@ -362,12 +365,12 @@ def question_numbers(question: str) -> list[float]:
     out = []
     question = DATE_SPAN.sub(" ", question)
     # Convert spelled-out terms, not conversational numbers such as "which one".
-    question = re.sub(r"\b(" + "|".join(WORD_NUMBERS) + r")\b(?=[ -]+(?:months?|years?|mo|yr)\b)",
+    question = re.sub(r"\b(" + NUMBER_WORDS_RE + r")\b(?=[ -]+(?:months?|years?|mo|yr|monthly payments?)\b)",
                       lambda m: str(WORD_NUMBERS[m.group(1).lower()]), question, flags=re.I)
     for m in re.finditer(r"\$?(\d[\d,]*(?:\.\d+)?)(\s*%)?", question):
         if not m.group(2):
             n = _num(m.group(1))
-            unit = re.match(r"[- ]+(months?|years?|mo|yr)\b", question[m.end():], re.I)
+            unit = re.match(r"[- ]+(months?|years?|mo|yr|monthly payments?)\b", question[m.end():], re.I)
             if unit and not m.group(0).startswith("$"):
                 n = TermMonths(n * (12 if unit.group(1).lower().startswith(("year", "yr")) else 1))
             out.append(n)
@@ -742,7 +745,7 @@ class KnowledgeBase:
         # page); question words that this family's rows use must be in the row (jumbo, platinum, share);
         # a modifier or feature that only a sibling product has ("introductory" on the Rewards Visa), or
         # that no row of the family has ("reverse", "interest-only" mortgage, "Unicorn" Savings), refuses.
-        fam_rows, required = None, set()
+        fam_rows, required, label_words = None, set(), set()
         qfam = (_family_of(canonical(question)) or _family_of(canonical(message or question))
                 or self._infer_family(qtoks | ctx, si)) if shape == "rate" else ""
         tr["family"] = qfam
@@ -762,6 +765,7 @@ class KnowledgeBase:
             if not fam_rows or (modifier and modifier not in own) or content & siblings:
                 return Answer(text=REFUSAL, confident=False)
             required, anchor = content & own, None
+            label_words = self._label_words(si, group)
             tr.update(anchor=sorted(required))
 
         # An award from a named organisation written with initials ("J.D. Power"): the tokenizer keeps
@@ -805,12 +809,21 @@ class KnowledgeBase:
                 title_toks = self.pages[p.page][0]
                 if anchor and anchor not in p.toks and anchor not in title_toks:
                     continue
-                if fam_rows is not None and (pid not in fam_rows or not required <= p.toks | title_toks
-                                             or negated & p.toks):   # "non-jumbo": not the jumbo rows
-                    continue
+                factor = 1.0
+                if fam_rows is not None:
+                    if pid not in fam_rows or negated & p.toks:   # "non-jumbo": not the jumbo rows
+                        continue
+                    missing = required - p.toks - title_toks
+                    if missing:
+                        # A word that names a row (jumbo, Bright, Platinum) must be in the row: without it the
+                        # row is another tier or product. Other words of the family (a "Tier" column header,
+                        # "model") only lower the score.
+                        if missing & label_words:
+                            continue
+                        factor = REQ_PENALTY ** len(missing)
                 own = sum(idf[x] for x in sorted(words & p.toks))
                 from_title = sum(idf[x] for x in sorted((words & title_toks) - p.toks))
-                score[pid] = (own + 0.5 * from_title) / total
+                score[pid] = factor * (own + 0.5 * from_title) / total
             best = max(score.values(), default=0.0)
             # A family's rows are already the product asked about, so filler words lowering every row's
             # score must not push them under the 0.35 floor that guards free-text questions.
@@ -1204,6 +1217,22 @@ class KnowledgeBase:
             self._fam_index = fams
         return self._fam_index
 
+    def _label_words(self, si, group) -> set:
+        """Words of the row labels (first cell) of these families' rate rows in snapshot si."""
+        cache = self.__dict__.setdefault("_label_cache", {})
+        key = (si, tuple(sorted(group)))
+        if key not in cache:
+            by_family = self._family_index()[si][0]
+            words = set()
+            for f in group:
+                for pid in by_family[f]:
+                    cells = self.passages[pid].cells
+                    if cells:
+                        words |= tokens(cells[0][1])
+            # The family's own name ("certificate") is true of every row, labelled or not.
+            cache[key] = words - set().union(*(tokens(f) for f in group))
+        return cache[key]
+
     def _infer_family(self, words, si) -> str:
         """A rate question that doesn't name its product ("the 17-month jumbo special", "a 15-year fixed
         conventional purchase"): the family whose rate rows use the question's distinctive words, when
@@ -1537,7 +1566,8 @@ FAMILIES = [
     (r"credit card|visa", "Credit Card"),
     (r"money market", "Money Market"),
     (r"health savings|\bhsa\b", "Health Savings Account"),
-    (r"checking", "Checking"),
+    # "checking" the product, not "I am checking an old offer"
+    (r"(?<!\bam )(?<!'m )(?<!\bis )(?<!\bare )(?<!\bwas )(?<!\bwere )(?<!\bbe )(?<!\bbeen )(?<!\bjust )checking", "Checking"),
     (r"savings", "Savings"),
 ]
 

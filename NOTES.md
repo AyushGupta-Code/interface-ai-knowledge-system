@@ -1,62 +1,117 @@
 # Notes
 
-How the system works, why it makes these choices, and what it does not establish. All values and supporting quotations come from the supplied website snapshots. The implementation uses only Python's standard library and makes no network calls.
+The system answers members' questions from five dated snapshots of the credit union's website. Each answer gives the current value, the right tier and a source, or says "I don't know" when the site doesn't say.
 
-## How it works
+**No API keys, no packages, no network.** It is plain Python 3.11 with the standard library only. There is no language model. `requirements.txt` is empty on purpose.
 
-`build()` returns a knowledge system with the contract's `ingest()`, `answer()`, and `conflicts()` methods. Ingest keeps a separate index for every dated snapshot. Markdown headings provide context; ordinary paragraphs and coherent short lists become passages. Table rows and conservatively recognised `label: value` rate lines produce the same structured facts, with product, tier or term, measure, value, page, and snapshot kept separate.
-
-An answer first selects the newest snapshot on or before the requested date, or the latest snapshot when no date is supplied. It finds relevant pages, then checks their passages for the requested answer shape, product, numeric qualifiers, and measure. Rates must be supported by a rate-bearing column or explicitly labelled rate statement. A percentage describing a financing limit is not an interest rate. Eligible evidence is ranked by source authority, subject relevance, and article publication date. Broad rate lists can include matching products from several tables, with personal/business and introductory/regular rates labelled separately. Equivalent supporting facts on other pages can supply additional citations.
-
-Prose answers use a bounded bundle of supporting passages from the winning page. A matching page title can admit passages for inspection at half the lexical weight of body matches; it does not bypass eligibility checks or page selection. Link requests can return actual labelled destinations whose selected-snapshot target facts match the requested product and qualifiers. The bounded article observations can answer organisation counts and named recognition-program questions with their publication dates. Unsupported requests otherwise return an explicit refusal. A narrowly bounded historical fallback can return older evidence when the selected snapshot contains no supporting evidence at all; it labels the amount as historical, dates and cites the older snapshot, and explicitly says the current value is unconfirmed.
-
-Conflict detection compares the same product, segment, tier or term, and measure. It reports both observed changes over time and disagreements between pages within one snapshot. Related row-level findings can share a readable report, but the competing values retain their row labels. A separate bounded article extractor records organisation-wide branch counts and recognition counts for the same award program. Article publication dates remain distinct from crawl dates.
-
-## Running and configuration
-
-No API keys or third-party dependencies are required. Python 3.11 is the grading target. Copy the supplied snapshot archives into `snapshots_zip/` before evaluating a fresh checkout; the organizer's harness extracts them on the first run. These supplied archives and extracted pages are excluded from the public repository and must not be redistributed.
-
-Run evaluation from the repository root:
+**To run it:** the snapshots aren't in this repo (the data must not be redistributed). Copy the kit's five zips into `snapshots_zip/`, then run:
 
 ```bash
 python3 harness/run_eval.py --submission submission --eval eval/public_eval.jsonl
-python3 harness/run_eval.py --submission submission --eval dev/paraphrase_eval.jsonl
-python3 harness/run_eval.py --submission submission --eval dev/refusal_eval.jsonl
-python3 dev/check_conflicts.py
 ```
 
-The practice fixture uses `--snapshots harness/selftest/snapshots --eval harness/selftest/eval.jsonl --conflicts-gold harness/selftest/conflicts_gold.json`. Evaluation output is generated locally under `results/`. The detailed commands, measured results, retained experiments, and rejected experiments are recorded in `PLAN.md`.
+Loading the snapshots takes about 45 seconds. After that, each answer takes well under a second.
+
+## How it decides what's true now
+
+1. **Pick the snapshot by date.** With no date, use the newest snapshot. With "as of" a date, use the newest snapshot on or before that date.
+2. **Trust pages in a fixed order.** The rates page wins over a product page. A product page wins over a promotion, which wins over a calculator, then a blog post or news article, then a file. Among articles, the newer one wins.
+3. **Keep tiers apart.** A 12-month and a 60-month rate, a regular and a jumbo certificate, or a personal and a business account are different facts, not a contradiction.
+4. **Keep measures apart.** APR, APY and dividend rate are different numbers. The answer uses the one that was asked for.
+5. **Refuse rather than guess.** The question's product and its important words must be in the passage that answers it. If they aren't, the system says it can't find the answer, and it gives no number.
+6. **Contradictions are the same fact with different values.** They are either a **change** between snapshots or a **disagreement** between two pages in the same snapshot. Each one names the winning value and the reason.
+
+## How we got here, in phases
+
+Every change was checked with the scorer before it was kept. Every score below is the organizers' public set unless it says otherwise. [PLAN.md](PLAN.md) has the full log: each step, the command and the real output.
+
+**Phase 0. Starter: 0.093.** The organizers' starter kept only the latest copy of each page and returned the paragraph sharing the most words with the question. It ignored dates and found no contradictions.
+
+**Phase 1. Read the site before writing code.** For each of the 40 public questions, a script found the page holding the right answer and the page holding each wrong one. The wrong values came from five places:
+- another product on the same rate page
+- an old page that is still live
+- a calculator that was never updated
+- an old news article
+- an expired promotion
+
+That gave us the page-trust order above. We also decided against using an LLM (decision D1 below).
+
+**Phase 2. First version: 0.417.** It indexed every sentence, list and table row, with its page and date. Three failures, all fixed:
+- headings won over the text under them
+- the refusal message contained a phone number, which the scorer counts as giving a number
+- the year in "as of May 2026" was read as a product detail
+
+**Phase 3. Two-step search: 0.682.** First pick the pages that are about the question and hold an answer of the right type (a rate, a fee, hours, an address). Then pick the best passage on those pages. But our own reworded versions of the public questions scored only 0.47. The system was too fragile to wording.
+
+**Phase 4. Trace each wrong refusal: 0.774.**
+- **Tracing.** We followed every wrong "I don't know" to the step where the right passage was lost. Most of them had treated a filler word ("between", "highest") as the word the answer must contain.
+- **Rate questions.** These are now checked against the product's own rate rows. An unknown product ("Unicorn savings") is refused.
+- **Contradictions.** We rebuilt the list from facts instead of raw table rows. On our own answer key, its score (F1) went from 0.04 to 0.76.
+- **Tried and dropped:** stricter subject checks lowered the public score to 0.686.
+
+**Phase 5. The organizers' practice test, history and links: 0.851.**
+- Rates written as "label: value" lines are read as well as tables.
+- If a snapshot doesn't have a fact at all, an older value can be given, clearly labelled as old.
+- "Where can I find…" questions get the link itself.
+- Article counts (branches, awards) answer questions.
+- **The bug a fake sixth snapshot caught.** We made a fake October snapshot with one changed rate. A list answer showed the new rate next to the old one copied on a product page. Lists now keep one value per fact.
+
+**Phase 6. A second opinion from Codex: 0.882, and 18/18 on questions the site can't answer.** We added three narrow rules:
+- An award question needs the named organisation giving the award.
+- "How do I change my address?" with no steps on the site gets the general phone number.
+- "Do all branches keep the same hours?" lists each published schedule.
+
+**Phase 7. The first sealed test: 0.386.** Codex wrote 36 new questions without seeing our code, and we ran them once. 20 of the 32 questions the site can answer were refused. Members write conversationally ("I'm stopping at the Peosta branch…"), and the filler words were taken as the subject. We fixed the mechanism, measuring it on padded copies of the public questions:
+- Only the sentence that asks the question is read; names from the other sentences are kept.
+- The word the answer must contain is chosen from the three rarest words.
+- A named rate family is always searched.
+
+Padded questions went from 0.32 to 0.89. Public rose to 0.887.
+
+**Phase 8. The second sealed test: 0.616.** New failures appeared:
+- the subject was in one sentence and "its" in the next
+- "non-jumbo" was read as asking for jumbo
+- typos ("hometart")
+- "closing time" was read as a date
+- list questions ("every certificate term")
+- an unanswerable count ("how many drive-up windows") was answered with an address
+
+We fixed all six as general rules, not answers to those questions. The other sentences now count a little, and ruled-out words exclude rows.
+
+**Phase 9. The third sealed test: 0.657.** Conversational questions went from 0.36 to 0.77. Two answers gave the jumbo rate next to the regular one ("leaving out the jumbo", "the regular special"). Now "regular", "standard" and more ways of ruling something out exclude the jumbo rows. No fresh test has measured this fix yet.
+
+**Phase 10. Embeddings tried, then dropped.** We tried a small local embedding model (potion-base-8M). Added to the match score, it dropped the public score to 0.807. Used only to break ties, it fixed one reworded question. One question wasn't worth two packages and a 30 MB model. We also confirmed the system gives the same answers on Python 3.11 as on 3.14.
+
+## Results at the submitted commit
+
+| Test | Score |
+|---|---|
+| Public set (40 questions) | **0.887**, 0 stale values, 95% of answers under 0.3 s |
+| Our rewordings of the public questions | 0.868 |
+| Questions the site can't answer (ours) | 18/18 refused |
+| Contradictions (our own answer key) | F1 0.76, right winner every time, 0 of 8 false contradictions |
+| Sealed sets written by a separate agent | 0.386, then 0.616, then 0.657 |
+
+The sealed sets are the honest estimate for new wording. Our own sets were used while building, so they flatter the system.
 
 ## Decisions
 
-**D1. No LLM at answer time.** Retrieval, parsing, eligibility checks, and formatting use deterministic Python rules. This avoids API keys, network access, model downloads, and runtime dependencies. The tradeoff is weaker interpretation of unfamiliar wording; evaluation includes paraphrases and unsupported requests to make those limitations visible.
+The code comments refer to these labels.
 
-**D2. Extract values from snapshots, never from the evaluation key.** Ingest rebuilds the data from the supplied pages. Handwritten rules describe vocabulary, document structure, and evidence requirements; they do not supply rates, fees, counts, or answers keyed to question IDs.
+- **D1. No language model.** Rules can be explained line by line and need no key. The cost is weaker handling of unfamiliar wording.
+- **D2. Values come only from the snapshots.** Nothing is hard-coded from the eval questions.
+- **D3. Keep every snapshot.** Old snapshots answer "as of" questions and show changes. They never decide today's value.
+- **D4. Choose the snapshot by date.** Use an older snapshot only when the chosen one has no evidence at all, and label it as old.
+- **D5. One fact model.** Tables and "label: value" lines become the same kind of fact.
+- **D6. Trust pages in order.** Rates page, product page, promotion, calculator, article, then file.
+- **D7. Tiers are different facts.** Terms, balances, model years, personal and business are kept apart.
+- **D8. Measures are different facts.** APR, APY, dividend and interest rate are kept apart.
+- **D9. Refuse rather than substitute.** An unknown product or feature is refused instead of being matched to a nearby one.
+- **D10. Changes and disagreements are reported separately.** Dates show when a value was seen, not when it took effect.
 
-**D3. Retain history.** Older snapshots are indexed separately for historical questions and observed changes. A page's presence in an older snapshot does not establish that its value remains current.
+## What it still gets wrong
 
-**D4. Select dates from observations.** Without `as_of`, use the newest received snapshot. With `as_of`, use the newest snapshot dated on or before it. A date before the first snapshot refuses. Only when the selected snapshot has no supporting evidence at all may the system look back for the newest eligible older evidence. It must not use fallback to overcome conflicting evidence, a product/tier/measure mismatch, expiration, explicit withdrawal, or supersession. The implementation is deliberately narrower: plausible selected-snapshot subject evidence or any later version of the candidate source page blocks fallback, and promotion, article, calculator and file pages are excluded from fallback. Historical output identifies the source snapshot and says the current amount is unconfirmed. It never crosses the requested date and never turns a historical fallback into a confirmed current conflict resolution.
-
-**D5. Shared parsing and evidence checks.** Both tables and explicitly labelled rate lines feed one fact model. A labelled fact is separated before short-line list grouping so neighboring terms do not become one answer. Page retrieval narrows the search; passage checks establish whether the requested evidence exists. The winning evidence determines the answer format. This is a rule-based interpretation pipeline, not a claim that every question can be understood.
-
-**D6. Prefer authority among eligible evidence.** Rate hubs precede product pages, followed by other/promotion pages, calculators, articles, and files. Page type is determined by the site's established URL rules, with whole-path-segment fallbacks for otherwise unclassified rate, promotion, and calculator URLs. Source rank resolves competing observations; it does not prove that a lower-ranked page is erroneous. Articles remain necessary for facts published only in announcements; publication date helps distinguish newer observations from older retained articles.
-
-**D7. Preserve tiers and scope.** Terms, balances, model years, and personal/business product distinctions identify different facts. A specific request selects the matching facts. An unqualified product-family list can include multiple matching products and tables, labelled and deduplicated by identity. A branch-specific schedule does not establish organisation-wide hours.
-
-**D8. Preserve measures.** APR, APY, dividend rate, and interest rate remain distinct. Answer the requested measure; a generic rate answer labels what the source actually publishes. Different measures for one product are not competing values of the same fact.
-
-**D9. Prefer a refusal over an unsupported substitution.** Rate requests must match an extracted product family, requested term/tier, and supported features. An unfamiliar modifier does not silently select a nearby product; an introductory APR for one card cannot become another card's regular APR. Spelled-out month/year terms are normalised as typed month quantities (three years equals 36 months), while calendar dates are kept separate from product terms and model years. Non-rate questions retain the applicable lexical, answer-shape, and numeric checks. Refusals use no unverified numbers or fabricated sources.
-
-**D10. Report observed Change and Disagreement separately.** A Conflict is different observed values for the same fact, across or within snapshots. A **Change** records observations of that fact at different times. A **Disagreement** records differing page values within the same snapshot and cites both contemporaneous pages. Dates describe when a value was observed; they are not assumed effective dates. Dated article claims are reported as dated observations, without asserting that older claims were accurate or that retained historical articles should have been updated. Current resolutions require current evidence; otherwise the limitation must be explicit. Grouping is for readability and does not make different tiers or measures interchangeable.
-
-## Validation and limits
-
-The organizer's private evaluation and conflict answer key are unavailable. Public and reworded scores are development measurements, and the reworded set was written by us. The local conflict benchmark tests our evidence-backed interpretation, including explicit examples that must not be reported as conflicts. It does not establish the organizer's expected grouping or precision on the private list.
-
-The baseline before this build was public `0.7736`, reworded `0.7284`, must-refuse `17/18`, and local conflict F1 `0.7586`. Final measured scores are public **0.8868**, reworded **0.8675**, must-refuse **18/18**, practice **1.0000**, and local conflict F1 **0.7586** with resolution accuracy **1.0** and **0/8** conflict negatives failing. No stale traps or errors were observed, and p95 latency is under 0.3 s. The public target of 0.85 is met, and the final-score gap is **0.0193**, within the 0.05 target. The reworded set was written by us and tuned against during development, so it is not an independent measure of how the system handles new wording. On a sealed set of 36 questions written by a separate agent that never saw the system, run once, the final score was **0.3857**: all four must-refuse questions were refused and no stale value was given, but 20 of 32 answerable questions were refused, because conversational filler words ("I'm stopping at the Peosta branch…") are taken as the question's subject or dilute page matching. This is the system's main weakness. Two later changes target it generally, measured on development sets made by padding the public questions mechanically: in a message of several sentences only the sentence that asks is read (names and numbers from the rest are kept), which lifts the padded set from 0.32 to 0.84; and looser page matching, choosing the required word among the three rarest by the strongest match, and searching a named rate family's rows regardless of other words lift questions padded inside the sentence from 0.50 to 0.78. A second sealed set of 36 questions, written afterwards by another separate agent, scored **0.6162** at the final commit: vocabulary changes 0.86, plain rewordings 0.73, messy typing 0.52, conversational 0.36. A third sealed set, run after fixing what the second exposed, scored **0.657** (conversational 0.77, plain 0.73, messy 0.64, vocabulary 0.52), with two stale values: the jumbo certificate row given next to the regular one when the member wrote "leaving out the jumbo" or "the regular … special". The second set exposed a flaw in the asked-sentence rule (a subject stated in lowercase in one sentence and asked about as "its yield" in the next is lost), and gaps in negation ("non-jumbo"), messy spellings, lists of a table's terms, and refusing an unpublished detail about a real branch. Filler inside the question sentence remains the main limit: telling a subject word from a conversational word reliably needs a language model or embeddings. A small local embedding model (potion-base-8M) was tried late: added to the match score it lowered the public score from 0.8868 to 0.8072, and used only to break near-ties it gained one reworded question, so it was dropped (details in `PLAN.md`). `PLAN.md` records step-by-step results and finishing checks.
-
-Three narrow mechanisms cover question types that retrieval alone handled badly: an account-change question with no steps on the site gets the site's general phone number with that limitation stated; a question about whether all branches share the same hours lists each distinct published schedule with its dated source; and an award question naming an organisation written with initials needs a sentence where that organisation gives the award. Remaining limitations include membership eligibility (the site's service-area states are separate from its eligibility rules), unfamiliar prose, branch-specific versus general hours, recognition questions in unfamiliar wording, and the deliberately different VTO reporting-year policy. The public certificate-list item with no required values receives zero from the default scorer.
-
-Python 3.11 is verified: in a clean Python 3.11.18 environment the public, reworded and must-refuse scores and the finishing checks match the Python 3.14 runs, answer for answer. No third-party dependencies are declared.
-
-A full sixth-snapshot test (every snapshot copied, plus an October snapshot whose rate page changes one 12-month certificate APY) passes 41/41, including the organizer's harness run on that copy with no stale value. It first failed: a list answer could add a product page's old value next to the rate page's new one, and an unqualified question could be answered from the business rate page. Lists now keep one value per fact, the one the most authoritative page states in that snapshot, and a question that doesn't say "business" prefers personal rows (category questions such as "your credit cards" still list both).
+- **Filler words inside the question.** "What street should I type into…" can make "street" the word the answer must contain.
+- **Branch-specific questions** (0.25 on the third sealed set).
+- **Membership eligibility.** The site lists its service-area states separately from its eligibility rules, and the system doesn't join the two.
+- **One public question with no required values** scores zero under the default scorer, whatever the answer.

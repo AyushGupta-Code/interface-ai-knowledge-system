@@ -293,7 +293,7 @@ def expand_providers(text: str) -> str:
 
 
 # Wording words: they say how the member phrased the question, not what it is about, so they can never
-# be the specific word (dev/REFUSAL_TRACE.md: between, highest, list... were chosen and caused refusals).
+# be the specific word (an early refusal trace found between, highest, list... chosen and causing refusals).
 WORDING = set("between highest lowest top best list".split())
 # Words naming the kind of answer wanted (a link, a page). They are read by answer_shape(), and are not
 # topic words: counting them diluted page coverage ("link to the location finder").

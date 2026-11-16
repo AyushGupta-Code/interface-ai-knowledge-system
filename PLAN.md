@@ -489,3 +489,17 @@ Checks:
 - 0 stale traps on every set.
 - Gate scripts: 36/36, `--sixth` 41/41, `--determinism` 37/37.
 - Conflicts: F1 0.759, resolution 1.0, 0/8 negatives.
+
+**Step 5: a branch-count question may carry the member's own words.** Kept.
+- **What was wrong.** The organisation-wide branch count (from dated articles) answered only when every other word of the question was generic. "How many branch offices should I list?", "…in the latest published count?" and "…these days?" all fell through to text search, which returned boilerplate without the number.
+- **The fix.** Extra words are now allowed unless they set another scope: a capitalised name ("in Wisconsin"), a kind of place or service (state, city, county, drive-up, ATM, lobby, employees, members), or an award program's words.
+- **Rejected: the same loosening for award questions.** It broke the gate "recognized for customer service may be another program" (36 → 35/36), so award questions still need every word to fit. That gave up dup-087-i1 (inline 0.8326 → 0.8093).
+
+| | Public | Reworded | Must-refuse | Chatty | Inline | Context | Shape | S1 | S2 | S3 | Mean |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Step 5 | 0.8868 | 0.8694 | 18/18 | 0.8984 | **0.8093** | 0.9947 | 1.0 | **0.8079** | 0.8974 | **0.8194** | **0.8870** |
+
+Checks:
+- 0 stale traps on every set.
+- Gate scripts: 36/36, `--sixth` 41/41, `--determinism` 37/37.
+- Conflicts: F1 0.759, resolution 1.0, 0/8 negatives.

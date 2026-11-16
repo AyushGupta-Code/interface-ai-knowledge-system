@@ -280,6 +280,8 @@ ANCHOR_RETRIES = 2
 REQ_PENALTY = 0.5   # a family word missing from a rate row (not a row-label word) halves its score
 # A markdown link's address: "[Continue](https://…/hometart-grants#)" says "Continue", not "hometart".
 LINK_TARGET = re.compile(r"\]\((?:https?://|/)[^)\s]*\)")
+# Words that narrow an organisation-wide count to another scope ("drive-up locations", "in which states").
+SCOPE_WORDS = {stem(w) for w in "state states city cities county counties town towns area region driveup atm atms drive lobby employee employees member members staff".split()}
 INFER_SPREAD = 3   # a word at most this many families' rows use still points to a family
 INFER_MIN = 1.0   # the inferred family needs at least one distinctive word (or several shared ones)
 INFER_RATIO = 0.6   # and the runner-up must score below this share of it
@@ -1360,10 +1362,17 @@ class KnowledgeBase:
         if not branch and not recognition:
             return None
         observations = self._article_observations(si)
+        # Extra words in a branch-count question may be the member's own ("for my profile", "these days"), but
+        # not another scope: a name ("in Wisconsin"), a kind of place or service, or an award program's words.
+        names = tokens(" ".join(NAME_WORD.findall(" " + question))) - tokens("Dupaco")
+        programs = set().union(*(tokens(prog) for _, prog in observations), set())
+
+        def other_scope(extra):
+            return bool(extra & (names | SCOPE_WORDS | programs))
         matches = []
         for (topic, program), seen in observations.items():
             if not program:
-                if not branch or words - GENERIC - tokens("count total operate operates operating office offices"):
+                if not branch or other_scope(words - GENERIC - tokens("count total operate operates operating office offices")):
                     continue  # No state, branch, employee or other-scope substitutions.
             else:
                 awarder = tokens(topic.split()[1])
@@ -1371,7 +1380,7 @@ class KnowledgeBase:
                     continue
                 predicate = tokens("recognition recognized recognize received receive awards ranked rank ranking won win times")
                 if words - GENERIC - predicate - tokens(program):
-                    continue
+                    continue   # "recognized for customer service" may be another program: every word must fit
             eligible = [(url, record) for url, record in seen.items()
                         if record[0] <= self.snaps[si][1]]
             if not eligible:

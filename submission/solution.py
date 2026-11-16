@@ -227,6 +227,8 @@ def _answer_shape(question: str) -> str:
     q = question.lower()
     if re.search(r"\bhow (?:do|can|should) (?:i|we) (?:change|update|edit|correct)\b", q):
         return "any"   # "How do I change my address?" asks for a procedure, not an address
+    if re.search(r"\b(?:routing|aba|transit)\b", q) and not re.search(r"\bwire (?:fee|cost|charge)", q):
+        return "routing"   # the answer is a nine-digit routing number, whatever else the member says
     if (re.search(r"\b(?:terms?|term lengths?|repayment periods?)\b", q) and _family_of(canonical(q))
             and re.search(r"\b(?:every|all|list|which|what|options?|available|choose)\b", q)):
         return "rate"      # "List every certificate term": the family's rate rows, one per term
@@ -280,6 +282,8 @@ def passage_shapes(kind: str, text: str, cells=()) -> frozenset:
         s.add("count")   # "the fifth time Forbes recognized" answers "how many times"
     if DATE_TEXT.search(text):
         s.add("date")
+    if re.search(r"(?<![\d-])\d{9}(?![\d-])", text) and re.search(r"\b(?:routing|ABA)\b", text, re.I):
+        s.add("routing")
     return frozenset(s)
 
 
@@ -753,6 +757,10 @@ class KnowledgeBase:
         qtoks, ctx = (qtoks - lone) or qtoks, ctx - lone
         words = qtoks | ctx                       # every word that counts toward coverage and score
         weight = {t: (1.0 if t in qtoks else CONTEXT_WEIGHT) for t in words}
+        if shape == "routing":
+            routed = self._routing_answer(si, tr)
+            if routed is not None:
+                return routed
         compared = self._schedule_comparison(question, si, tr)
         if compared is not None:
             return compared
@@ -1264,6 +1272,32 @@ class KnowledgeBase:
                         best = (key, ph, pid)
             cache[si] = best and (best[1], best[2])
         return cache[si]
+
+    def _routing_answer(self, si: int, trace: dict):
+        """A routing (ABA) number question: whatever the member's other words, the answer is the nine-digit
+        number the site states next to "routing" or "ABA". The number stated by the most authoritative pages
+        wins; every rate, product or other page stating it is cited."""
+        start = sum(self.n_passages[:si])
+        found = defaultdict(list)
+        for pid, p in enumerate(self._snap_passages(si), start):
+            if "routing" in p.shapes and KIND_RANK[p.kind] < KIND_RANK["calculator"]:
+                for n in re.findall(r"(?<![\d-])\d{9}(?![\d-])", p.text):
+                    found[n].append(pid)
+        if not found:
+            return None
+        number = min(found, key=lambda n: (min(KIND_RANK[self.passages[pid].kind] for pid in found[n]),
+                                           -len({self.passages[pid].url for pid in found[n]}), n))
+        pids = sorted(found[number], key=lambda pid: (KIND_RANK[self.passages[pid].kind],
+                                                     len(self.passages[pid].text), self.passages[pid].url, pid))
+        win = self.passages[pids[0]]
+        trace.update(winner=pids[0], routing=number)
+        sid, taken_on = self.snaps[si]
+        urls = list(dict.fromkeys(self.passages[pid].url for pid in pids))
+        sources = [Source(url=win.url, snapshot_id=sid, quote=win.text[:200])]
+        sources += [Source(url=u, snapshot_id=sid) for u in urls[1:]]
+        also = f"\nAlso stated on: {', '.join(urls[1:4])}" if len(urls) > 1 else ""
+        return Answer(text=f"{win.title or 'Dupaco'} (as of {taken_on}):\nDupaco's routing (ABA) number: {number}.\n"
+                           f"{win.text[:300]}{also}\nSource: {win.url}", sources=sources)
 
     def _support_channel(self, question, si, trace):
         """For "how do I change my address?" when the site doesn't describe the steps: say so, and give

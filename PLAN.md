@@ -639,3 +639,14 @@ Checks: 0 stale traps; p95 0.68 s; gates 36/36, 41/41, 37/37; conflicts F1 0.758
 | Step 11 | 0.9643 | 0.8713 | 18/18 | 0.9506 | 0.8326 | 0.9947 | 1.0 | 0.8247 | 0.9314 | 0.8634 | 0.7819 | **0.9038** | **0.9017** |
 
 Checks: 0 stale traps; p95 0.65 s; gates 36/36, 41/41, 37/37; conflicts F1 0.7586, resolution 1.0, 0/8 negatives.
+
+**Step 12: a routing-number question has its own answer kind.** Kept.
+- **What was wrong.** Routing questions with the member's own words ("Out of curiosity, can you repeat…", "What nine-digit bank routing code should I give payroll…") picked a filler word as the required word and refused, or got a news article. Others were answered from the wire page, while three sets expect the contact page.
+- **The fix.** A question naming routing, ABA or transit asks for a nine-digit number stated next to "routing" or "ABA". The number the most authoritative pages state wins. The answer cites every rate, product and other page stating it, so the contact page and the cash-management page are both sources.
+- **Rejected first: no required word at all when all three tries find nothing.** No set changed, and the area question it was meant for got a PDF.
+
+| | Public | Reworded | Must-refuse | Chatty | Inline | Context | Shape | S1 | S2 | S3 | S4 | S5 | Mean (11) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Step 12 | 0.9643 | 0.8713 | 18/18 | 0.9506 | **0.8558** | **1.0** | 1.0 | **0.8569** | **0.9365** | 0.8634 | **0.8177** | **0.9111** | **0.9116** |
+
+Checks: 0 stale traps; p95 0.70 s; gates 36/36, 41/41, 37/37; conflicts F1 0.7586, resolution 1.0, 0/8 negatives.

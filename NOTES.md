@@ -10,7 +10,7 @@ The system answers members' questions from five dated snapshots of the credit un
 python3 harness/run_eval.py --submission submission --eval eval/public_eval.jsonl
 ```
 
-Loading the snapshots takes about 45 seconds. After that, each answer takes well under a second.
+Loading the snapshots takes about 25 seconds. After that, 95% of answers take under 0.2 seconds.
 
 ## How it decides what's true now
 
@@ -18,7 +18,13 @@ Loading the snapshots takes about 45 seconds. After that, each answer takes well
 2. **Trust pages in a fixed order.** The rates page wins over a product page. A product page wins over a promotion, which wins over a calculator, then a blog post or news article, then a file. Among articles, the newer one wins.
 3. **Keep tiers apart.** A 12-month and a 60-month rate, a regular and a jumbo certificate, or a personal and a business account are different facts, not a contradiction.
 4. **Keep measures apart.** APR, APY and dividend rate are different numbers. The answer uses the one that was asked for.
-5. **Refuse rather than guess.** The question's product and its important words must be in the passage that answers it. If they aren't, the system says it can't find the answer, and it gives no number.
+5. **Answer by default, refuse for a reason.** The scorer gives 0 both to a wrong answer and to a refused answerable question, and most questions are answerable. So the system answers unless it has a named reason not to:
+   - the product has no rate rows, or none matches the term, tier or amount asked;
+   - a place or product the member names isn't on the answer's page;
+   - a count question has no passage stating a count of that thing;
+   - a product question only matches a blog post on its less specific words.
+
+   A refusal never contains a number.
 6. **Contradictions are the same fact with different values.** They are either a **change** between snapshots or a **disagreement** between two pages in the same snapshot. Each one names the winning value and the reason.
 
 ## How we got here, in phases
@@ -82,17 +88,41 @@ We fixed all six as general rules, not answers to those questions. The other sen
 
 **Phase 10. Embeddings tried, then dropped.** We tried a small local embedding model (potion-base-8M). Added to the match score, it dropped the public score to 0.807. Used only to break ties, it fixed one reworded question. One question wasn't worth two packages and a 30 MB model. We also confirmed the system gives the same answers on Python 3.11 as on 3.14.
 
+**Phase 11. The fourth sealed test, and answering more: 0.519.** The diagnosis was the same each time: most lost points were answerable questions refused, not wrong answers. So we changed direction:
+- **The product is guessed from the words.** "Bright Savings" or "Investor's Choice" without the word "savings" still finds its rate rows.
+- **A missing word costs points instead of blocking the answer.** Words that name a row (jumbo, Platinum) still block it, so wrong tiers stay out.
+- **Member wording:** "promo CD", "biz", "settlement costs", "half-year", "non jumbo", "satnav". A question may ask for two terms at once ("36 and 48 months").
+
+Set 4 went from 0.519 to 0.640 before we looked at its questions.
+
+**Phase 12. The public questions we still missed: 0.887 → 0.964.** Three general rules:
+- The join page points to a map image for its area. The answer now adds the site's own sentence naming the states.
+- "Last year" questions show every year the site states ("294 in 2023", "256 in 2024").
+- "flexibility" matches "flexible".
+
+**Phase 13. The fifth sealed test: 0.711.** This was our best first run on unseen questions. Then the fixes:
+- "48 mos not 36" no longer requires the 36.
+- Routing-number questions always give the routing number.
+- List questions prefer the passage that names the options.
+- General hours questions answer even with filler words.
+- Two must-refuse questions now refuse ("square feet of the Galena building", "lowest FICO score for the Rewards Visa").
+
+We also confirmed again that Python 3.11 gives the same answers.
+
 ## Results at the submitted commit
 
 | Test | Score |
 |---|---|
-| Public set (40 questions) | **0.887**, 0 stale values, 95% of answers under 0.3 s |
-| Our rewordings of the public questions | 0.868 |
+| Public set (40 questions) | **0.964**, 0 stale values, 95% of answers under 0.2 s |
+| Our rewordings of the public questions | 0.871 |
 | Questions the site can't answer (ours) | 18/18 refused |
 | Contradictions (our own answer key) | F1 0.76, right winner every time, 0 of 8 false contradictions |
-| Sealed sets written by a separate agent | 0.386, then 0.616, then 0.657 |
+| Sealed sets written by a separate agent, first run | 0.386, 0.616, 0.657, 0.519, then 0.711 |
+| The same five sets now (used for fixes since) | 0.857, 0.937, 0.898, 0.888, 0.942 |
 
-The sealed sets are the honest estimate for new wording. Our own sets were used while building, so they flatter the system.
+The public score's ceiling is 0.969: one question has no required values and always scores zero.
+
+The first runs of the sealed sets are the honest estimate for new wording. Every set has since been used for fixes, so their current scores flatter the system.
 
 ## Decisions
 
@@ -106,12 +136,12 @@ The code comments refer to these labels.
 - **D6. Trust pages in order.** Rates page, product page, promotion, calculator, article, then file.
 - **D7. Tiers are different facts.** Terms, balances, model years, personal and business are kept apart.
 - **D8. Measures are different facts.** APR, APY, dividend and interest rate are kept apart.
-- **D9. Refuse rather than substitute.** An unknown product or feature is refused instead of being matched to a nearby one.
+- **D9. Don't substitute.** An unknown product or feature is refused instead of being matched to a nearby one. Otherwise the system answers (rule 5).
 - **D10. Changes and disagreements are reported separately.** Dates show when a value was seen, not when it took effect.
 
 ## What it still gets wrong
 
-- **Filler words inside the question.** "What street should I type into…" can make "street" the word the answer must contain.
-- **Branch-specific questions** (0.25 on the third sealed set).
-- **Membership eligibility.** The site lists its service-area states separately from its eligibility rules, and the system doesn't join the two.
+- **Unusual wording still slips.** The answer must contain one of the question's three rarest words. When all three are the member's own ("living or working can qualify someone"), it refuses.
+- **Membership questions.** "Who can join" and "join online" reworded with filler words still find the wrong passage sometimes.
+- **Questions asking for two facts from two places** (the HSA's opening deposit and its monthly fee) get only one of them.
 - **One public question with no required values** scores zero under the default scorer, whatever the answer.

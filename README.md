@@ -8,13 +8,13 @@ It is plain Python 3.11 with the standard library only. There is no LLM, no API 
 
 | Set | Final score | Notes |
 |---|---|---|
-| Public eval (40 questions) | **0.8868** | 0 stale values, p95 under 0.3 s |
-| Reworded public questions (written by me) | 0.8675 | gap to public 0.019 |
+| Public eval (40 questions) | **0.9643** | 0 stale values, p95 0.13 s; the ceiling is 0.969 (one question has no required values) |
+| Reworded public questions (written by me) | 0.8713 | |
 | Questions the site doesn't answer | 18/18 refused | |
 | Conflicts (local answer key) | F1 0.759 | right winner every time, 0/8 false conflicts |
-| Three sealed sets written by a separate agent, each run once | 0.386 → 0.616 → 0.657 | the honest estimate for unseen wording |
+| Five sealed sets written by a separate agent, each first run once | 0.386 → 0.616 → 0.657 → 0.519 → **0.711** | the honest estimate for unseen wording |
 
-The sealed sets are the most realistic measure. Conversational and messy wording is still the main weakness. [NOTES.md](NOTES.md) explains why.
+The first runs of the sealed sets are the most realistic measure. After each run, the set was used to find failure kinds, so their scores today (0.86–0.94) flatter the system. [NOTES.md](NOTES.md) explains how it decides, and where it still fails.
 
 ## Run it
 
@@ -24,7 +24,7 @@ The website snapshots belong to the credit union and are not in this repo. Put t
 python3 harness/run_eval.py --submission submission --eval eval/public_eval.jsonl
 ```
 
-Ingest takes about 45 seconds. After that, each answer takes a fraction of a second.
+Ingest takes about 25 seconds. After that, each answer takes a fraction of a second.
 
 ## What's where
 

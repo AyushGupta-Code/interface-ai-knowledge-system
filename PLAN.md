@@ -686,3 +686,10 @@ Checks: 0 stale traps; p95 0.65 s; gates 36/36, 41/41, 37/37; conflicts F1 0.758
 | Step 15 | 0.9643 | 0.8713 | 18/18 | 0.9506 | 0.8868 | 1.0 | 1.0 | 0.8569 | 0.9365 | **0.8980** | **0.8879** | 0.9417 | **0.9267** |
 
 Checks: 0 stale traps; p95 0.78 s; gates 36/36, 41/41, 37/37; conflicts F1 0.7586, resolution 1.0, 0/8 negatives.
+
+## Python 3.11 verified again (2026-11-16), at `d585fdf`
+
+- `PY=~/.venvs/interface-311/bin/python suite.sh py311` (Python 3.11.18): public 0.9643, reworded 0.8713, must-refuse 18/18, chatty 0.9506, inline 0.8868, context 1.0, shape 1.0, sealed 1–5 0.8569 / 0.9365 / 0.8980 / 0.8879 / 0.9417, mean 0.9267, 0 stale traps.
+- All 472 answers are identical to the Python 3.14 run.
+- On 3.11: gates 36/36, `--sixth` 41/41, `--determinism` 37/37; conflicts F1 0.7586, resolution 1.0, 0/8 negatives.
+- Public run alone: ingest 23.4 s, p95 0.13 s.

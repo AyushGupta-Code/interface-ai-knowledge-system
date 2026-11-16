@@ -597,3 +597,23 @@ Diagnosis (the set is now spent):
 - **Wrong sentence or part of a list (5):** the Holiday Club pay-out date (an old news article won), the HSA opening deposit, the three money market names, the Bright Savings exclusions (its rate row won over its footnote).
 - **Source credit only (3):** the routing number from the wire page, not the contact page; a jumbo special from the business page, not the personal one.
 - **One must-refuse answered:** "how many safe-deposit boxes are available" got the fee schedule's box sizes.
+
+## Answer-more round 3 (2026-11-16), after sealed set 5
+
+Set 5 is spent and joins the development sets. The decision number is now the mean over 11 sets (public, reworded, chatty, inline, context, shape, sealed 1–5). Baseline at `609ce09`: **0.8843**.
+
+**Step 9: numbers the member rules out or types loosely, and "promotional" as special.** Kept.
+- **A ruled-out number isn't a qualifier.** In "48 mos not 36", the 36 used to be required too, so no row passed. Numbers after not, instead of, rather than, other than, except or excluding are now dropped.
+- **Units written short or joined on.** "10mo" and "48 mos" are now terms in months.
+- **A rate typed with a space** ("old sheet says 3 80") is a percentage, not two qualifiers.
+- **"Promotional" before a family name** means that family's special, when the family has one. It also becomes a required word, so a regular row can't answer.
+
+| | Public | Reworded | Must-refuse | Chatty | Inline | Context | Shape | S1 | S2 | S3 | S4 | S5 | Mean (11) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Step 8 | 0.9643 | 0.8713 | 18/18 | 0.9506 | 0.8326 | 0.9947 | 1.0 | 0.8247 | 0.9314 | 0.8634 | 0.7819 | 0.7114 | 0.8843 |
+| Step 9 | 0.9643 | 0.8713 | 18/18 | 0.9506 | 0.8326 | 0.9947 | 1.0 | 0.8247 | 0.9314 | 0.8634 | 0.7819 | **0.8026** | **0.8925** |
+
+Checks:
+- 0 stale traps on every set; p95 0.56 s.
+- Gate scripts: 36/36, `--sixth` 41/41, `--determinism` 37/37.
+- Conflicts: F1 0.7586, resolution 1.0, 0/8 negatives.

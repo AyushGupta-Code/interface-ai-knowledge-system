@@ -384,6 +384,13 @@ DATE_SPAN = re.compile(
     r"|\b(?:19|20)\d\d-\d{1,2}(?:-\d{1,2})?\b|\b(?:as of|in|during) (?:19|20)\d\d\b(?!-)", re.I)
 
 
+RULED_OUT_NUMBER = re.compile(r"\b(?:not|instead\s+of|rather\s+than|other\s+than|except|excluding)\s+(?:the\s+|a\s+)?"
+                              r"\d+(?:[- ]*(?:months?|years?|mos?|yrs?)\b)?", re.I)
+
+
+SPACED_RATE = re.compile(r"(?<![\d.,$])\b\d\s\d\d\b(?![\d.,])(?!\s*(?:months?|years?|mos?|yrs?|monthly)\b)\s*%?", re.I)
+
+
 class TermMonths(float):
     """A term qualifier in months, distinct from balances and model years."""
 
@@ -393,6 +400,10 @@ def question_numbers(question: str) -> list[float]:
     out = []
     question = DATE_SPAN.sub(" ", question)
     question = re.sub(r"\bhalf[- ]year\b", "6 month", question, flags=re.I)
+    # "48 mos not 36": a number the member rules out is not a qualifier
+    question = RULED_OUT_NUMBER.sub(" ", question)
+    # "old sheet says 3 80": a rate typed with a space for the point is a percentage, not a qualifier
+    question = SPACED_RATE.sub(" ", question)
     # "36 and 48 months", "12 or 24-month": the unit belongs to every number of the list
     question = re.sub(r"\b(\d+)(?=(?:\s*(?:,|and|or|&)\s*\d+)+[- ]+(months?|years?|mo|yr)\b)",
                       lambda m: f"{m.group(1)} {m.group(2)}", question, flags=re.I)
@@ -402,7 +413,7 @@ def question_numbers(question: str) -> list[float]:
     for m in re.finditer(r"\$?(\d[\d,]*(?:\.\d+)?)(\s*%)?", question):
         if not m.group(2):
             n = _num(m.group(1))
-            unit = re.match(r"[- ]+(months?|years?|mo|yr|monthly payments?)\b", question[m.end():], re.I)
+            unit = re.match(r"(?:[- ]+|(?=[a-z]))(months?|years?|mos?|yrs?|monthly payments?)\b", question[m.end():], re.I)
             if unit and not m.group(0).startswith("$"):
                 n = TermMonths(n * (12 if unit.group(1).lower().startswith(("year", "yr")) else 1))
             out.append(n)
@@ -804,9 +815,12 @@ class KnowledgeBase:
             content = qtoks - GENERIC - WORDING - DEFAULT_TIER - LIST_WORDS
             modifier = _modifier(canonical(question), qfam) or _modifier(canonical(message or question), qfam)
             tr.update(family=qfam, modifier=modifier, sibling_words=sorted(content & siblings))
+            alias = MODIFIER_ALIAS.get(modifier)
+            if alias and alias in own:
+                modifier = alias          # "the promotional CD" is the certificate special
             if not fam_rows or (modifier and modifier not in own) or content & siblings:
                 return Answer(text=REFUSAL, confident=False)
-            required, anchor = content & own, None
+            required, anchor = (content | ({modifier} if alias == modifier else set())) & own, None
             label_words = self._label_words(si, group)
             tr.update(anchor=sorted(required))
 
@@ -1688,6 +1702,7 @@ FAMILIES = [
 # happens to be called "Standard").
 DEFAULT_TIER = set("standard regular normal basic ongoing purchase".split())
 # "new" and "used" describe the vehicle, not a separate loan product: the auto rows price them by model year.
+MODIFIER_ALIAS = {stem("promotional"): stem("special")}
 NOT_A_MODIFIER = DEFAULT_TIER | {"new", "used", "unsecured"}   # personal loans are unsecured
 
 # Article facts for conflicts (D10). Organisation-wide statements only: "It has ... 22 branch office
